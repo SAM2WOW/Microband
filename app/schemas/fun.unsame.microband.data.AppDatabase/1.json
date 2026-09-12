@@ -1,0 +1,27 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "microband-protocol-log-v1",
+    "entities": [
+      {
+        "tableName": "protocol_packet_log",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `timestampMillis` INTEGER NOT NULL, `direction` TEXT NOT NULL, `transport` TEXT NOT NULL, `commandId` INTEGER, `payloadLength` INTEGER NOT NULL, `hexPayload` TEXT NOT NULL, `parsedStatus` TEXT)",
+        "fields": [
+          {"fieldPath":"id","columnName":"id","affinity":"INTEGER","notNull":true},
+          {"fieldPath":"timestampMillis","columnName":"timestampMillis","affinity":"INTEGER","notNull":true},
+          {"fieldPath":"direction","columnName":"direction","affinity":"TEXT","notNull":true},
+          {"fieldPath":"transport","columnName":"transport","affinity":"TEXT","notNull":true},
+          {"fieldPath":"commandId","columnName":"commandId","affinity":"INTEGER","notNull":false},
+          {"fieldPath":"payloadLength","columnName":"payloadLength","affinity":"INTEGER","notNull":true},
+          {"fieldPath":"hexPayload","columnName":"hexPayload","affinity":"TEXT","notNull":true},
+          {"fieldPath":"parsedStatus","columnName":"parsedStatus","affinity":"TEXT","notNull":false}
+        ],
+        "primaryKey":{"autoGenerate":true,"columnNames":["id"]},
+        "indices":[],"foreignKeys":[]
+      }
+    ],
+    "views": [],
+    "setupQueries": ["CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)","INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'microband-protocol-log-v1')"]
+  }
+}

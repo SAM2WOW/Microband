@@ -1,0 +1,88 @@
+package com.unsame.microband.notification
+
+import android.app.Notification
+import android.app.KeyguardManager
+import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
+import com.unsame.microband.MicrobandApplication
+import java.time.Instant
+import java.util.ArrayDeque
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+
+/**
+ * Normalizes and forwards allowed phone notifications without persisting their private content.
+ */
+class MicrobandNotificationListenerService : NotificationListenerService() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val recentFingerprints = LinkedHashMap<Int, Long>()
+    private val recentSends = ArrayDeque<Long>()
+
+    override fun onNotificationPosted(notification: StatusBarNotification?) {
+        val posted = notification ?: return
+        if (posted.packageName == packageName || posted.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+        val normalized = normalize(posted)
+        val category = NotificationClassifier.classify(
+            posted.packageName,
+            normalized.sourceLabel,
+            posted.notification.category,
+        )
+        if (posted.isOngoing && category != NotificationCategory.CALLS) return
+
+        scope.launch {
+            val app = application as MicrobandApplication
+            val enabled = app.preferences.notificationCategories.first()
+            if (category.preferenceKey !in enabled) return@launch
+            if (!shouldSend(normalized)) return@launch
+
+            val keyguard = getSystemService(KeyguardManager::class.java)
+            val privateSafe = if (keyguard?.isDeviceLocked == true) {
+                normalized.copy(body = "Unlock your phone to read this notification")
+            } else normalized
+            val association = runCatching { app.associationManager.currentAssociation() }.getOrNull() ?: return@launch
+            app.connectionManager.forwardNotification(privateSafe, association.device)
+        }
+    }
+
+    private fun normalize(posted: StatusBarNotification): BandPhoneNotification {
+        val extras = posted.notification.extras
+        val label = runCatching {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(posted.packageName, 0)).toString()
+        }.getOrDefault(posted.packageName)
+        return BandPhoneNotification(
+            sourcePackage = posted.packageName,
+            sourceLabel = label,
+            title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.take(80),
+            body = (extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
+                ?: extras.getCharSequence(Notification.EXTRA_TEXT))?.toString()?.take(320),
+            timestamp = Instant.ofEpochMilli(posted.postTime),
+        )
+    }
+
+    @Synchronized
+    private fun shouldSend(notification: BandPhoneNotification): Boolean {
+        val now = System.currentTimeMillis()
+        recentFingerprints.entries.removeAll { now - it.value > DUPLICATE_WINDOW_MILLIS }
+        while (recentSends.isNotEmpty() && now - recentSends.first() > RATE_WINDOW_MILLIS) recentSends.removeFirst()
+        val fingerprint = listOf(notification.sourcePackage, notification.title, notification.body).hashCode()
+        if (fingerprint in recentFingerprints || recentSends.size >= MAX_PER_MINUTE) return false
+        recentFingerprints[fingerprint] = now
+        recentSends.addLast(now)
+        return true
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    companion object {
+        private const val DUPLICATE_WINDOW_MILLIS = 30_000L
+        private const val RATE_WINDOW_MILLIS = 60_000L
+        private const val MAX_PER_MINUTE = 8
+    }
+}
