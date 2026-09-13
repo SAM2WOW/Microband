@@ -7,6 +7,7 @@ import android.service.notification.StatusBarNotification
 import com.unsame.microband.MicrobandApplication
 import java.time.Instant
 import java.util.ArrayDeque
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,6 +22,7 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val recentFingerprints = LinkedHashMap<Int, Long>()
     private val recentSends = ArrayDeque<Long>()
+    private val activeCalls = ConcurrentHashMap<String, BandPhoneNotification>()
 
     override fun onNotificationPosted(notification: StatusBarNotification?) {
         val posted = notification ?: return
@@ -32,19 +34,41 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
             posted.notification.category,
         )
         if (posted.isOngoing && category != NotificationCategory.CALLS) return
+        val kind = deliveryKind(posted, normalized, category)
+        if (kind == BandNotificationKind.INCOMING_CALL || kind == BandNotificationKind.ANSWERED_CALL) {
+            activeCalls[posted.key] = normalized
+        } else if (category == NotificationCategory.CALLS) {
+            activeCalls.remove(posted.key)
+        }
 
         scope.launch {
             val app = application as MicrobandApplication
             val enabled = app.preferences.notificationCategories.first()
             if (category.preferenceKey !in enabled) return@launch
-            if (!shouldSend(normalized)) return@launch
+            if (!shouldSend(normalized, kind)) return@launch
 
             val keyguard = getSystemService(KeyguardManager::class.java)
             val privateSafe = if (keyguard?.isDeviceLocked == true) {
                 normalized.copy(body = "Unlock your phone to read this notification")
             } else normalized
             val association = runCatching { app.associationManager.currentAssociation() }.getOrNull() ?: return@launch
-            app.connectionManager.forwardNotification(privateSafe, association.device)
+            app.connectionManager.forwardNotification(privateSafe, kind, association.device)
+        }
+    }
+
+    override fun onNotificationRemoved(notification: StatusBarNotification?) {
+        val posted = notification ?: return
+        val call = activeCalls.remove(posted.key) ?: return
+        scope.launch {
+            val app = application as MicrobandApplication
+            val enabled = app.preferences.notificationCategories.first()
+            if (NotificationCategory.CALLS.preferenceKey !in enabled) return@launch
+            val association = runCatching { app.associationManager.currentAssociation() }.getOrNull() ?: return@launch
+            app.connectionManager.forwardNotification(
+                call.copy(timestamp = Instant.now()),
+                BandNotificationKind.HANGUP_CALL,
+                association.device,
+            )
         }
     }
 
@@ -54,6 +78,7 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(posted.packageName, 0)).toString()
         }.getOrDefault(posted.packageName)
         return BandPhoneNotification(
+            notificationKey = posted.key,
             sourcePackage = posted.packageName,
             sourceLabel = label,
             title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.take(80),
@@ -63,12 +88,31 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
         )
     }
 
+    private fun deliveryKind(
+        posted: StatusBarNotification,
+        notification: BandPhoneNotification,
+        category: NotificationCategory,
+    ): BandNotificationKind {
+        if (category != NotificationCategory.CALLS) return BandNotificationKind.MESSAGE
+        val text = listOfNotNull(notification.title, notification.body).joinToString(" ").lowercase()
+        return when {
+            "voicemail" in text -> BandNotificationKind.VOICEMAIL
+            "missed" in text -> BandNotificationKind.MISSED_CALL
+            posted.isOngoing && ("incoming" in text || "ringing" in text || posted.notification.actions.orEmpty().any {
+                val action = it.title?.toString()?.lowercase().orEmpty()
+                "answer" in action || "accept" in action
+            }) -> BandNotificationKind.INCOMING_CALL
+            posted.isOngoing -> BandNotificationKind.ANSWERED_CALL
+            else -> BandNotificationKind.MISSED_CALL
+        }
+    }
+
     @Synchronized
-    private fun shouldSend(notification: BandPhoneNotification): Boolean {
+    private fun shouldSend(notification: BandPhoneNotification, kind: BandNotificationKind): Boolean {
         val now = System.currentTimeMillis()
         recentFingerprints.entries.removeAll { now - it.value > DUPLICATE_WINDOW_MILLIS }
         while (recentSends.isNotEmpty() && now - recentSends.first() > RATE_WINDOW_MILLIS) recentSends.removeFirst()
-        val fingerprint = listOf(notification.sourcePackage, notification.title, notification.body).hashCode()
+        val fingerprint = listOf(notification.sourcePackage, notification.title, notification.body, kind).hashCode()
         if (fingerprint in recentFingerprints || recentSends.size >= MAX_PER_MINUTE) return false
         recentFingerprints[fingerprint] = now
         recentSends.addLast(now)

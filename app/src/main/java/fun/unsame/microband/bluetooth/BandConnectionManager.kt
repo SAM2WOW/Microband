@@ -11,13 +11,32 @@ import com.unsame.microband.band.protocol.BandPacketCodec.hex
 import com.unsame.microband.band.protocol.BandProtocol
 import com.unsame.microband.band.transport.RfcommBandTransport
 import com.unsame.microband.data.MicrobandPreferences
+import com.unsame.microband.data.HealthSnapshotDao
+import com.unsame.microband.data.HealthDailyDao
+import com.unsame.microband.data.HealthDailyEntity
 import com.unsame.microband.data.PacketLogDao
 import com.unsame.microband.data.ProtocolPacketLog
+import com.unsame.microband.data.toEntity
+import com.unsame.microband.data.toModel
+import com.unsame.microband.band.model.BandHealthSnapshot
+import com.unsame.microband.band.model.BandFirmwareIdentity
+import com.unsame.microband.band.model.FirmwareUpdateStage
+import com.unsame.microband.band.model.FirmwareUpdateStatus
+import com.unsame.microband.band.model.FirmwareApplication
+import com.unsame.microband.band.model.BandTileCatalog
+import com.unsame.microband.band.model.BandTileInfo
 import com.unsame.microband.notification.BandPhoneNotification
+import com.unsame.microband.notification.BandNotificationKind
+import com.unsame.microband.band.protocol.BandNotificationCodec
 import java.time.Instant
 import java.time.LocalDateTime
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +49,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -40,6 +60,8 @@ import kotlinx.coroutines.withTimeout
 class BandConnectionManager(
     private val application: Application,
     private val packetLogDao: PacketLogDao,
+    private val healthSnapshotDao: HealthSnapshotDao,
+    private val healthDailyDao: HealthDailyDao,
     private val preferences: MicrobandPreferences,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -52,14 +74,29 @@ class BandConnectionManager(
     private val mutableEvents = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val events: SharedFlow<String> = mutableEvents.asSharedFlow()
     val recentLogs = packetLogDao.observeRecent().stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val healthSnapshot = healthSnapshotDao.observe().map { it?.toModel() }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+    val healthHistory = healthDailyDao.observeAll()
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+    private val mutableHealthSyncInProgress = MutableStateFlow(false)
+    val healthSyncInProgress: StateFlow<Boolean> = mutableHealthSyncInProgress.asStateFlow()
+    private val mutableFirmwareUpdate = MutableStateFlow(FirmwareUpdateStatus())
+    val firmwareUpdate: StateFlow<FirmwareUpdateStatus> = mutableFirmwareUpdate.asStateFlow()
+    private val mutableTiles = MutableStateFlow(BandTileCatalog())
+    val tiles: StateFlow<BandTileCatalog> = mutableTiles.asStateFlow()
 
     private var redactNextTransfer = false
+    private var redactNextReceive = false
+    @Volatile private var suppressPacketLogging = false
     private val transport = RfcommBandTransport { direction, bytes, status ->
         val id = commandId(bytes)
-        val shouldRedact = direction == "TX" && id == null && redactNextTransfer
-        if (shouldRedact) redactNextTransfer = false
+        val shouldRedactTransfer = direction == "TX" && id == null && redactNextTransfer
+        val shouldRedactReceive = direction == "RX" && redactNextReceive
+        if (shouldRedactTransfer) redactNextTransfer = false
+        if (shouldRedactReceive) redactNextReceive = false
         if (direction == "TX" && id in SENSITIVE_TRANSFER_COMMANDS) redactNextTransfer = true
-        if (preferences.protocolLogging.first()) {
+        if (direction == "TX" && id in SENSITIVE_RESPONSE_COMMANDS) redactNextReceive = true
+        if (!suppressPacketLogging && preferences.protocolLogging.first()) {
             packetLogDao.insert(
                 ProtocolPacketLog(
                     timestampMillis = System.currentTimeMillis(),
@@ -67,7 +104,7 @@ class BandConnectionManager(
                     transport = "RFCOMM",
                     commandId = id,
                     payloadLength = bytes.size,
-                    hexPayload = if (shouldRedact) "<redacted private payload>" else bytes.hex(),
+                    hexPayload = if (shouldRedactTransfer || shouldRedactReceive) "<redacted private payload>" else bytes.hex(),
                     parsedStatus = status,
                 ),
             )
@@ -78,27 +115,71 @@ class BandConnectionManager(
     private val oobeManager = BandOobeManager(preferences)
     private var activeDevice: BluetoothDevice? = null
     private var inspectedInfo: BandDeviceInfo? = null
+    @Volatile private var keepConnected = false
+
+    init {
+        scope.launch {
+            while (true) {
+                delay(30_000)
+                if (keepConnected && activeDevice != null) {
+                    runCatching { ensureLiveConnection() }
+                }
+            }
+        }
+    }
 
     @android.annotation.SuppressLint("MissingPermission")
     fun connect(device: BluetoothDevice) = scope.launch {
+        keepConnected = true
         connectionMutex.withLock {
-            if (mutableState.value is BandConnectionState.Connected && activeDevice == device) return@withLock
             activeDevice = device
-            mutableState.value = BandConnectionState.Connecting
-            try {
-                ensureBonded(device)
-                transport.connect(device)
-                val name = runCatching { device.name }.getOrNull() ?: "Microsoft Band"
-                mutableState.value = BandConnectionState.Connected(BandDeviceInfo(name))
-                try {
-                    val info = inspectConnectedBand(name)
-                    if (info.oobeComplete == true) syncClockInternal(info)
-                } catch (exception: Exception) {
-                    mutableEvents.emit("Connected. Tap Check Band to retry device checks: ${exception.userMessage()}")
-                }
-            } catch (exception: Exception) {
-                mutableState.value = BandConnectionState.Error(exception.userMessage())
+            if (mutableState.value is BandConnectionState.Connected && runCatching { protocol.getUtcTime() }.isSuccess) return@withLock
+            runCatching { connectLocked(device) }
+                .onFailure { mutableState.value = BandConnectionState.Error(it.userMessage()) }
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private suspend fun connectLocked(device: BluetoothDevice) {
+        mutableState.value = BandConnectionState.Connecting
+        ensureBonded(device)
+        transport.connect(device)
+        val name = runCatching { device.name }.getOrNull() ?: "Microsoft Band"
+        mutableState.value = BandConnectionState.Connected(BandDeviceInfo(name))
+        // The official SDK negotiates protocol version before requesting sensors.
+        // Older firmware may reject this command, so a failed negotiation must not
+        // prevent basic time/notification operations.
+        runCatching { protocol.checkSdkCompatibility() }
+        try {
+            val info = inspectConnectedBand(name)
+            if (info.oobeComplete == true) syncClockInternal(info)
+        } catch (exception: Exception) {
+            mutableEvents.emit("Connected. Device checks will retry automatically: ${exception.userMessage()}")
+        }
+    }
+
+    private suspend fun ensureLiveConnection() {
+        val device = activeDevice ?: throw BandException.NotPaired()
+        connectionMutex.withLock {
+            val live = mutableState.value is BandConnectionState.Connected &&
+                runCatching { protocol.getUtcTime() }.isSuccess
+            if (!live) {
+                transport.disconnect()
+                connectLocked(device)
             }
+        }
+    }
+
+    private suspend fun <T> withReconnect(block: suspend () -> T): T {
+        ensureLiveConnection()
+        return try {
+            block()
+        } catch (first: Exception) {
+            if (first is BandException.ProtocolStatus || first is BandException.InvalidPacket) throw first
+            transport.disconnect()
+            mutableState.value = BandConnectionState.Disconnected
+            ensureLiveConnection()
+            block()
         }
     }
 
@@ -131,9 +212,12 @@ class BandConnectionManager(
     }
 
     fun disconnect() = scope.launch {
-        transport.disconnect()
-        inspectedInfo = null
-        mutableState.value = BandConnectionState.Disconnected
+        keepConnected = false
+        connectionMutex.withLock {
+            transport.disconnect()
+            inspectedInfo = null
+            mutableState.value = BandConnectionState.Disconnected
+        }
     }
 
     suspend fun clearProtocolLog() = packetLogDao.clear()
@@ -201,21 +285,284 @@ class BandConnectionManager(
             mutableEvents.emit("Connect to your Band first")
             return@launch
         }
-        runCatching { protocol.showNotification("Microband", "Notification forwarding is working") }
+        runCatching { protocol.showMessage("Microband", "Notification forwarding is working", Instant.now()) }
             .onSuccess { mutableEvents.emit("Test notification sent to Band") }
             .onFailure { mutableEvents.emit(it.userMessage()) }
     }
 
-    fun forwardNotification(notification: BandPhoneNotification, device: BluetoothDevice) = scope.launch {
-        if (mutableState.value !is BandConnectionState.Connected) connect(device).join()
-        if (mutableState.value !is BandConnectionState.Connected) return@launch
-        val content = listOfNotNull(notification.title, notification.body)
-            .filter { it.isNotBlank() }
-            .joinToString(" — ")
-            .ifBlank { "New notification" }
-        runCatching {
-            protocol.showNotification(notification.sourceLabel.ifBlank { "Phone" }, content)
+    fun refreshHealthData() = scope.launch {
+        if (mutableState.value !is BandConnectionState.Connected) {
+            mutableEvents.emit("Connect to your Band to sync health data")
+            return@launch
         }
+        mutableHealthSyncInProgress.value = true
+        runCatching { refreshHealthInternal() }
+            .onSuccess { mutableEvents.emit("Band health data synchronized") }
+            .onFailure { mutableEvents.emit(it.userMessage()) }
+        mutableHealthSyncInProgress.value = false
+    }
+
+    fun refreshTiles() = scope.launch {
+        runCatching { withReconnect { protocol.getTileCatalog() } }
+            .onSuccess { mutableTiles.value = it }
+            .onFailure { mutableEvents.emit("Could not read Band tiles: ${it.userMessage()}") }
+    }
+
+    fun applyTiles(tiles: List<BandTileInfo>) = scope.launch {
+        runCatching {
+            withReconnect {
+                protocol.setTiles(tiles)
+                protocol.getTileCatalog()
+            }.also { mutableTiles.value = it }
+        }.onSuccess { mutableEvents.emit("Band tiles updated") }
+            .onFailure { mutableEvents.emit("Could not update Band tiles: ${it.userMessage()}") }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    suspend fun runLatestFirmwareUpdate() {
+        if (mutableFirmwareUpdate.value.isRunning) return
+        val device = activeDevice ?: throw BandException.NotPaired()
+        try {
+            updateFirmwareState(FirmwareUpdateStage.Downloading, 1, "Downloading verified Band 2 firmware")
+            val file = downloadVerifiedFirmware { percent ->
+                updateFirmwareState(FirmwareUpdateStage.Downloading, (percent * 20 / 100).coerceAtLeast(1), "Downloading firmware • $percent%")
+            }
+            keepConnected = false
+            connectionMutex.withLock {
+                performFirmwareUpdate(device, file)
+            }
+        } catch (exception: Exception) {
+            updateFirmwareState(FirmwareUpdateStage.Failed, mutableFirmwareUpdate.value.percent, exception.userMessage())
+            mutableEvents.emit("Firmware update stopped: ${exception.userMessage()}")
+            val recovered = runCatching {
+                transport.disconnect()
+                transport.connect(device)
+                protocol.getFirmwareIdentity()
+            }.getOrNull()
+            if (recovered?.runningApplication == FirmwareApplication.App) {
+                keepConnected = true
+                runCatching { recordInspection(protocol.inspect(runCatching { device.name }.getOrNull() ?: "Microsoft Band")) }
+            } else if (recovered != null) {
+                mutableFirmwareUpdate.value = mutableFirmwareUpdate.value.copy(
+                    message = "${exception.userMessage()} Band is in ${recovered.runningApplication}; keep it charged and retry.",
+                )
+            }
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private suspend fun performFirmwareUpdate(device: BluetoothDevice, file: File) {
+        updateFirmwareState(FirmwareUpdateStage.Checking, 22, "Checking Band identity and battery")
+        transport.disconnect()
+        transport.connect(device)
+        var identity = protocol.getFirmwareIdentity()
+        val expectedPcb = identity.pcbId
+        val expectedBootloader = identity.bootloaderVersion
+        if (expectedPcb < 20) throw BandException.DeviceUnsupported()
+
+        if (identity.runningApplication == FirmwareApplication.App) {
+            if (identity.applicationVersion == LATEST_FIRMWARE_VERSION && protocol.firmwareAssetsValid()) {
+                updateFirmwareState(FirmwareUpdateStage.Complete, 100, "Band already has the latest firmware")
+                keepConnected = true
+                recordInspection(protocol.inspect(device.name ?: "Microsoft Band"))
+                return
+            }
+            if (!protocol.firmwareAssetsValid()) throw BandException.InvalidPacket("Existing Band firmware assets are invalid")
+            val battery = protocol.batteryPercent()
+            if (battery < 50) throw BandException.InvalidPacket("Charge the Band to at least 50% before updating")
+            updateFirmwareState(FirmwareUpdateStage.EnteringUpdater, 25, "Restarting Band in update mode")
+            protocol.bootIntoFirmwareUpdater()
+            transport.disconnect()
+            identity = reconnectFirmware(device, FirmwareApplication.UpApp, expectedPcb, expectedBootloader)
+        }
+
+        if (identity.runningApplication == FirmwareApplication.TwoUp) {
+            updateFirmwareState(FirmwareUpdateStage.Transferring, 28, "Repairing Band updater")
+            uploadFirmwareTracked(file, 28, 52)
+            transport.disconnect()
+            identity = reconnectFirmware(device, FirmwareApplication.UpApp, expectedPcb, expectedBootloader)
+        }
+        if (identity.runningApplication != FirmwareApplication.UpApp) {
+            throw BandException.InvalidPacket("Band did not enter its firmware updater")
+        }
+
+        updateFirmwareState(FirmwareUpdateStage.Transferring, 30, "Installing firmware")
+        uploadFirmwareTracked(file, 30, 86)
+        transport.disconnect()
+        updateFirmwareState(FirmwareUpdateStage.Rebooting, 88, "Waiting for Band to restart")
+        identity = reconnectFirmware(device, FirmwareApplication.App, expectedPcb, expectedBootloader)
+        updateFirmwareState(FirmwareUpdateStage.Verifying, 96, "Verifying installed firmware")
+        if (identity.applicationVersion != LATEST_FIRMWARE_VERSION) {
+            throw BandException.InvalidPacket("Band restarted with firmware ${identity.applicationVersion}")
+        }
+        if (!protocol.firmwareAssetsValid()) throw BandException.InvalidPacket("Band reported invalid firmware assets")
+
+        val info = protocol.inspect(device.name ?: "Microsoft Band")
+        recordInspection(info)
+        keepConnected = true
+        updateFirmwareState(FirmwareUpdateStage.Complete, 100, "Firmware ${identity.applicationVersion} installed")
+        mutableEvents.emit("Band firmware updated to ${identity.applicationVersion}")
+    }
+
+    private suspend fun uploadFirmwareTracked(file: File, start: Int, end: Int) {
+        suppressPacketLogging = true
+        try {
+            protocol.uploadFirmware(file) { transferPercent ->
+                val overall = start + (end - start) * transferPercent / 100
+                updateFirmwareState(FirmwareUpdateStage.Transferring, overall, "Installing firmware • $transferPercent%")
+            }
+        } finally {
+            suppressPacketLogging = false
+        }
+    }
+
+    private suspend fun reconnectFirmware(
+        device: BluetoothDevice,
+        expectedApplication: FirmwareApplication,
+        expectedPcb: Int,
+        expectedBootloader: String,
+    ): BandFirmwareIdentity {
+        val deadline = System.currentTimeMillis() + 240_000
+        delay(5_000)
+        var last: Exception? = null
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                transport.connect(device)
+                val identity = protocol.getFirmwareIdentity()
+                if (identity.runningApplication != expectedApplication || identity.pcbId != expectedPcb || identity.bootloaderVersion != expectedBootloader) {
+                    throw BandException.InvalidPacket("Unexpected Band identity after restart")
+                }
+                return identity
+            } catch (exception: Exception) {
+                last = exception
+                runCatching { transport.disconnect() }
+                delay(2_000)
+            }
+        }
+        throw BandException.InvalidPacket("Band did not return from update mode: ${last?.message ?: "timeout"}")
+    }
+
+    private fun updateFirmwareState(stage: FirmwareUpdateStage, percent: Int, message: String) {
+        mutableFirmwareUpdate.value = FirmwareUpdateStatus(stage, percent.coerceIn(0, 100), message)
+    }
+
+    private fun downloadVerifiedFirmware(onProgress: (Int) -> Unit): File {
+        val directory = File(application.cacheDir, "firmware").apply { mkdirs() }
+        val target = File(directory, "envoy-$LATEST_FIRMWARE_VERSION.bin")
+        if (target.isFile && target.length() == LATEST_FIRMWARE_SIZE && sha256(target) == LATEST_FIRMWARE_SHA256) {
+            onProgress(100)
+            return target
+        }
+        val temporary = File(directory, "download.part")
+        val connection = URL(LATEST_FIRMWARE_URL).openConnection() as HttpURLConnection
+        connection.connectTimeout = 20_000
+        connection.readTimeout = 30_000
+        connection.instanceFollowRedirects = true
+        connection.connect()
+        if (connection.responseCode !in 200..299) throw BandException.InvalidPacket("Firmware download failed (${connection.responseCode})")
+        val expectedLength = connection.contentLengthLong
+        var received = 0L
+        connection.inputStream.use { input ->
+            temporary.outputStream().use { output ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                    received += count
+                    if (expectedLength > 0) onProgress((received * 100 / expectedLength).toInt())
+                }
+            }
+        }
+        connection.disconnect()
+        if (temporary.length() != LATEST_FIRMWARE_SIZE || sha256(temporary) != LATEST_FIRMWARE_SHA256) {
+            temporary.delete()
+            throw BandException.InvalidPacket("Downloaded firmware failed cryptographic verification")
+        }
+        if (!temporary.renameTo(target)) {
+            temporary.copyTo(target, overwrite = true)
+            temporary.delete()
+        }
+        onProgress(100)
+        return target
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { "%02X".format(it) }
+    }
+
+    private suspend fun refreshHealthInternal() {
+        val fresh = withReconnect { protocol.getHealthSnapshot() }
+        val cached = healthSnapshot.value
+        val sameDay = cached?.syncedAt?.atZone(ZoneId.systemDefault())?.toLocalDate() ==
+            fresh.syncedAt.atZone(ZoneId.systemDefault()).toLocalDate()
+        val merged = fresh.copy(
+            stepsToday = fresh.stepsToday ?: cached?.stepsToday?.takeIf { sameDay },
+            lastRun = fresh.lastRun ?: cached?.lastRun,
+            lastWorkout = fresh.lastWorkout ?: cached?.lastWorkout,
+            lastSleep = fresh.lastSleep ?: cached?.lastSleep,
+        )
+        healthSnapshotDao.upsert(merged.toEntity())
+        fresh.daily?.takeIf { it.hasData && !it.cumulativeSinceReset }?.let { daily ->
+            healthDailyDao.upsert(
+                HealthDailyEntity(
+                    localDate = LocalDate.now().toString(),
+                    syncedAt = fresh.syncedAt.toEpochMilli(),
+                    steps = daily.steps,
+                    calories = daily.calories,
+                    distanceCentimeters = daily.distanceCentimeters,
+                    flightsAscended = daily.flightsAscended,
+                    elevationGainCentimeters = daily.elevationGainCentimeters,
+                    uvExposure = daily.uvExposure,
+                ),
+            )
+        }
+    }
+
+    fun forwardNotification(
+        notification: BandPhoneNotification,
+        kind: BandNotificationKind,
+        device: BluetoothDevice,
+    ) = scope.launch {
+        if (mutableFirmwareUpdate.value.isRunning) return@launch
+        activeDevice = device
+        keepConnected = true
+        runCatching { withReconnect {
+            when (kind) {
+                BandNotificationKind.MESSAGE -> protocol.showMessage(
+                    sender = notification.title?.takeIf { it.isNotBlank() }
+                        ?: notification.sourceLabel.ifBlank { "Phone" },
+                    body = notification.body?.takeIf { it.isNotBlank() }
+                        ?: notification.title?.takeIf { it.isNotBlank() }
+                        ?: "New notification from ${notification.sourceLabel}",
+                    timestamp = notification.timestamp,
+                    messageId = stableNotificationId(notification.notificationKey),
+                )
+                else -> protocol.showCall(
+                    caller = notification.title?.takeIf { it.isNotBlank() }
+                        ?: notification.sourceLabel.ifBlank { "Phone" },
+                    callId = stableNotificationId(notification.notificationKey),
+                    timestamp = notification.timestamp,
+                    type = when (kind) {
+                        BandNotificationKind.INCOMING_CALL -> BandNotificationCodec.CallType.Incoming
+                        BandNotificationKind.ANSWERED_CALL -> BandNotificationCodec.CallType.Answered
+                        BandNotificationKind.MISSED_CALL -> BandNotificationCodec.CallType.Missed
+                        BandNotificationKind.HANGUP_CALL -> BandNotificationCodec.CallType.Hangup
+                        BandNotificationKind.VOICEMAIL -> BandNotificationCodec.CallType.Voicemail
+                        BandNotificationKind.MESSAGE -> error("handled above")
+                    },
+                )
+            }
+        } }.onFailure { mutableEvents.tryEmit("Notification forwarding failed: ${it.userMessage()}") }
     }
 
     fun setThemeColor(accent: Int) = scope.launch {
@@ -301,12 +648,19 @@ class BandConnectionManager(
         } else null
     }
 
+    private fun stableNotificationId(key: String): Int = (key.hashCode() and Int.MAX_VALUE).coerceAtLeast(1)
+
     private fun Throwable.userMessage(): String = when (this) {
         is BandException -> message ?: "Band operation failed"
         else -> message ?: "Band operation failed"
     }
 
     companion object {
+        const val LATEST_FIRMWARE_VERSION = "2.0.5202.0"
+        private const val LATEST_FIRMWARE_SIZE = 1_838_103L
+        private const val LATEST_FIRMWARE_SHA256 = "2473896B8281B2FF81E462374A48BE8A3E8901FB6B2C55AF0FE9125930A60727"
+        private const val LATEST_FIRMWARE_URL = "https://raw.githubusercontent.com/MicrosoftBandDev/archive/main/Firmware/Band%202%20(2.0.5202.0)/envoy-2.0.5202.0.bin"
         private val SENSITIVE_TRANSFER_COMMANDS = setOf(0xCC05, 0xC311)
+        private val SENSITIVE_RESPONSE_COMMANDS = setOf(0x8F83, 0xCE82, 0xCE83, 0xCE84)
     }
 }

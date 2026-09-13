@@ -25,6 +25,7 @@ class MicrobandPreferences(private val context: Context) {
     val notificationCategories: Flow<Set<String>> = context.dataStore.data.map {
         it[NOTIFICATION_CATEGORIES] ?: DEFAULT_NOTIFICATION_CATEGORIES
     }
+    val themeAccent: Flow<Int> = context.dataStore.data.map { it[THEME_ACCENT] ?: DEFAULT_THEME_ACCENT }
     val oobeStep: Flow<BandOobeStep> = context.dataStore.data.map { preferences ->
         preferences[OOBE_STEP]?.let { runCatching { BandOobeStep.valueOf(it) }.getOrNull() }
             ?: BandOobeStep.Inspect
@@ -50,6 +51,10 @@ class MicrobandPreferences(private val context: Context) {
         }
     }
 
+    suspend fun setThemeAccent(accent: Int) {
+        context.dataStore.edit { it[THEME_ACCENT] = accent }
+    }
+
     suspend fun setOobeStep(step: BandOobeStep) {
         context.dataStore.edit { it[OOBE_STEP] = step.name }
     }
@@ -59,6 +64,8 @@ class MicrobandPreferences(private val context: Context) {
         private val PROTOCOL_LOGGING = booleanPreferencesKey("protocol_logging")
         private val OOBE_STEP = stringPreferencesKey("oobe_step")
         private val NOTIFICATION_CATEGORIES = stringSetPreferencesKey("notification_categories")
+        private val THEME_ACCENT = intPreferencesKey("theme_accent")
         private val DEFAULT_NOTIFICATION_CATEGORIES = setOf("calls", "messages", "discord", "calendar")
+        private const val DEFAULT_THEME_ACCENT = 0xFF0078D7.toInt()
     }
 }

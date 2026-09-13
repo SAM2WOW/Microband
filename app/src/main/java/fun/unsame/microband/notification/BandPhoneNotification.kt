@@ -3,12 +3,22 @@ package com.unsame.microband.notification
 import java.time.Instant
 
 data class BandPhoneNotification(
+    val notificationKey: String,
     val sourcePackage: String,
     val sourceLabel: String,
     val title: String?,
     val body: String?,
     val timestamp: Instant,
 )
+
+enum class BandNotificationKind {
+    MESSAGE,
+    INCOMING_CALL,
+    ANSWERED_CALL,
+    MISSED_CALL,
+    HANGUP_CALL,
+    VOICEMAIL,
+}
 
 enum class NotificationCategory(val preferenceKey: String, val label: String) {
     CALLS("calls", "Phone calls"),

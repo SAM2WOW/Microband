@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(Unit) { viewModel.refresh() }
                 LaunchedEffect(Unit) { viewModel.refreshNotificationAccess(context) }
+                LaunchedEffect(Unit) { viewModel.refreshBackgroundStatus(context) }
 
                 MicrobandApp(
                     state = state,
@@ -74,9 +75,14 @@ class MainActivity : ComponentActivity() {
                     onOpenNotificationAccess = { viewModel.openNotificationAccess(context) },
                     onSetNotificationCategory = viewModel::setNotificationCategory,
                     onSendTestNotification = viewModel::sendTestNotification,
+                    onOpenBatteryOptimization = { viewModel.openBatteryOptimizationSettings(context) },
+                    onRefreshHealth = viewModel::refreshHealthData,
                     onSetThemeColor = viewModel::setThemeColor,
                     onChooseWallpaper = { wallpaperLauncher.launch(arrayOf("image/*")) },
                     onClearWallpaper = viewModel::clearWallpaper,
+                    onRefreshTiles = viewModel::refreshTiles,
+                    onApplyTiles = viewModel::applyTiles,
+                    onStartFirmwareUpdate = { viewModel.startFirmwareUpdate(context) },
                     onOpenFirmwareArchive = { viewModel.openFirmwareArchive(context) },
                     onChooseFirmwarePackage = { firmwareLauncher.launch(arrayOf("*/*")) },
                 )
@@ -88,5 +94,6 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         viewModel.refresh()
         viewModel.refreshNotificationAccess(this)
+        viewModel.refreshBackgroundStatus(this)
     }
 }

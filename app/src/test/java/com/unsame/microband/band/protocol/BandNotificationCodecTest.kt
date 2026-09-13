@@ -3,6 +3,7 @@ package com.unsame.microband.band.protocol
 import com.unsame.microband.band.protocol.BandPacketCodec.hex
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.Instant
 
 class BandNotificationCodecTest {
     @Test
@@ -20,5 +21,25 @@ class BandNotificationCodecTest {
     fun utf8TruncationDoesNotSplitCodePoints() {
         assertEquals("abc", BandNotificationCodec.truncateUtf8("abcdef", 3).decodeToString())
         assertEquals("😀", BandNotificationCodec.truncateUtf8("😀x", 4).decodeToString())
+    }
+
+    @Test
+    fun smsUsesNativeMessagesTileAndMessagingEnvelope() {
+        val packet = BandNotificationCodec.sms("Alex", "Hello", Instant.EPOCH)
+
+        assertEquals(true, packet.hex().contains("35BCEDB47B02104DA7971099CD2AD98A"))
+        assertEquals(
+            BandPacketCodec.littleEndianShort(packet.size).hex() + "6500",
+            BandNotificationCodec.commandArguments(packet.size, BandNotificationCodec.MESSAGING_MESSAGE_TYPE).hex(),
+        )
+    }
+
+    @Test
+    fun callUsesNativeCallsTileAndCallState() {
+        val packet = BandNotificationCodec.call("Alex", 42, Instant.EPOCH, BandNotificationCodec.CallType.Missed)
+        val hex = packet.hex()
+
+        assertEquals(true, hex.contains("99C0B122BEF2AC4B8ED82D6B0B3C25D1"))
+        assertEquals(true, hex.endsWith("5803"))
     }
 }

@@ -30,13 +30,15 @@ Microband is early-stage software built around reverse-engineered interoperabili
 | Band 2 identification and diagnostics | Working |
 | First-run Band setup/OOBE completion | Working |
 | UTC, local time, and timezone sync | Working |
-| Android notification forwarding | Working |
+| Native Messages and Calls forwarding | Experimental |
 | Notification filters and privacy controls | Working |
 | Theme colors | Working |
 | Me Tile wallpaper | Experimental |
-| Firmware package validation | Working |
-| Firmware flashing | Not enabled |
-| Activity, sleep, and workout history | Planned |
+| Verified Band 2 firmware update | Experimental |
+| Built-in tile enable/disable and ordering | Experimental |
+| Daily steps, calories, distance, floors, elevation, and UV | Experimental |
+| Latest run/workout/sleep | Experimental |
+| Long-term activity and sleep archive import | Planned |
 | Health Connect export | Planned |
 
 Microsoft Band 1 is not currently supported.
@@ -49,10 +51,12 @@ Microsoft Band 1 is not currently supported.
 - Inspects PCB, firmware, application, setup, and clock state.
 - Safely resumes and completes first-run Band 2 setup.
 - Synchronizes both UTC and displayed local time.
-- Forwards selected Android notifications with persistent filters, duplicate suppression, rate limiting, locked-phone privacy, and automatic reconnection.
-- Changes the Band's six-color theme using friendly color presets.
+- Forwards selected Android notifications into the Band's native Messages tile and sends phone-call lifecycle updates to its Calls tile, with persistent filters, duplicate suppression, rate limiting, locked-phone privacy, and automatic reconnection.
+- Reads daily steps, calories, distance, floors, elevation, and UV plus the latest run, exercise, and sleep summaries directly from the Band; daily readings build private week and month charts on the phone.
+- Changes the Band's six-color theme using an expanded preset palette or a custom hue, saturation, and brightness picker.
 - Center-crops photos locally into the Band 2's 310 × 128 Me Tile format.
-- Validates the archived Band 2 firmware package before it can be considered for future update support.
+- Enables, disables, and reorders the Band's built-in tiles while preserving the essential Me and Settings tiles.
+- Installs the archived Band 2 `2.0.5202.0` firmware using an exact size and SHA-256 allowlist, battery preflight, updater recovery path, and post-reboot verification.
 - Provides opt-in protocol diagnostics with private notification and wallpaper payloads redacted.
 
 ## Requirements
@@ -97,7 +101,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 5. Tap **Connect**.
 6. If the Band is factory-reset, follow **Finish setup**. Microband checks the device model and current OOBE state before sending setup commands.
 7. Open **Notifications** to choose which alerts may appear on the Band.
-8. Open **Personalize** to select a theme color or Me Tile wallpaper.
+8. Open **Personalize** to select a preset or custom theme color, choose a Me Tile wallpaper, manage built-in tiles, or view the Band's supported Watch Mode options.
+
+Microband's notification listener runs without keeping the app screen open. On phones with aggressive power management, open **Notifications → Allow background operation**, disable battery optimization for Microband, and allow background activity or Auto-start if the manufacturer provides those controls.
 
 If the Band was previously paired with another phone, remove that pairing from the Band before trying again.
 
@@ -116,9 +122,9 @@ Microband is local-first by design:
 
 ## Firmware safety
 
-Firmware flashing is intentionally disabled. Microband can identify the installed firmware and validate the known Band 2 `2.0.5202.0` archive package, but it will not flash it until battery checks, recovery paths, transfer verification, and interruption handling have been validated on hardware.
+Microband can install only the known Band 2 `2.0.5202.0` archive image. It verifies the exact byte length and SHA-256 checksum, requires at least 50% battery, keeps a foreground service and wake lock during transfer, handles the Band's updater stages, and checks device identity, installed version, and firmware assets after reboot.
 
-Installing incorrect or interrupted firmware can permanently damage a Band. Please do not add an unrestricted flashing path.
+Firmware installation remains inherently risky: interruption, radio failure, power loss, or an unexpected hardware state can permanently damage a Band. The app requires an explicit responsibility warning before starting. Keep the Band charging and the phone nearby until verification completes. Never alter the allowlisted package or bypass the checks.
 
 ## Building and testing
 
@@ -128,9 +134,9 @@ Run unit tests, lint, and a debug build:
 .\gradlew.bat testDebugUnitTest lintDebug assembleDebug
 ```
 
-The unit tests cover packet framing, status parsing, time conversion, timezone payloads, notification encoding and classification, personalization colors, and association matching.
+The unit tests cover packet framing, status parsing, time conversion, timezone payloads, notification encoding and classification, health decoding, tile-list encoding, personalization colors, and association matching.
 
-A physical Band 2 is required to validate Bluetooth discovery, RFCOMM behavior, OOBE, notification display, themes, wallpapers, and future firmware operations.
+A physical Band 2 is required to validate Bluetooth discovery, RFCOMM behavior, OOBE, notification display, health sync, themes, wallpapers, tile changes, and firmware operations.
 
 ## Architecture
 

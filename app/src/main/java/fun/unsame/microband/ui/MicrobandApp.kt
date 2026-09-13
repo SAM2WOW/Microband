@@ -3,8 +3,10 @@ package com.unsame.microband.ui
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -26,17 +28,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -44,18 +49,26 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -69,14 +82,23 @@ import androidx.compose.ui.unit.dp
 import com.unsame.microband.R
 import com.unsame.microband.band.model.BandConnectionState
 import com.unsame.microband.band.model.BandDeviceInfo
+import com.unsame.microband.band.model.BandHealthSnapshot
+import com.unsame.microband.band.model.BandActivitySummary
+import com.unsame.microband.band.model.BandSleepSummary
+import com.unsame.microband.band.model.BandTileInfo
+import com.unsame.microband.band.model.FirmwareUpdateStage
 import com.unsame.microband.band.oobe.BandOobeStep
 import com.unsame.microband.data.ProtocolPacketLog
+import com.unsame.microband.data.HealthDailyEntity
 import com.unsame.microband.notification.NotificationCategory
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 private enum class Destination(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Rounded.Home),
+    Health("Health", Icons.Rounded.Favorite),
     Notifications("Notifications", Icons.Rounded.Notifications),
     Personalize("Personalize", Icons.Rounded.Palette),
     Settings("Settings", Icons.Rounded.Settings),
@@ -98,9 +120,14 @@ fun MicrobandApp(
     onOpenNotificationAccess: () -> Unit,
     onSetNotificationCategory: (String, Boolean) -> Unit,
     onSendTestNotification: () -> Unit,
+    onOpenBatteryOptimization: () -> Unit,
+    onRefreshHealth: () -> Unit,
     onSetThemeColor: (Int) -> Unit,
     onChooseWallpaper: () -> Unit,
     onClearWallpaper: () -> Unit,
+    onRefreshTiles: () -> Unit,
+    onApplyTiles: (List<BandTileInfo>) -> Unit,
+    onStartFirmwareUpdate: () -> Unit,
     onOpenFirmwareArchive: () -> Unit,
     onChooseFirmwarePackage: () -> Unit,
 ) {
@@ -139,14 +166,17 @@ fun MicrobandApp(
     ) { padding ->
         AnimatedContent(targetState = destinations[selected], label = "destination") { destination ->
             when (destination) {
-                Destination.Home -> HomeScreen(state, onConnect, onDisconnect, onInspect, onFinishSetup, onSyncClock, Modifier.padding(padding))
+                Destination.Home -> HomeScreen(state, onConnect, onDisconnect, onInspect, onFinishSetup, onSyncClock, onRefreshHealth, Modifier.padding(padding))
+                Destination.Health -> HealthScreen(state, onRefreshHealth, Modifier.padding(padding))
                 Destination.Notifications -> NotificationsScreen(
                     accessGranted = state.notificationAccessGranted,
+                    batteryOptimizationIgnored = state.batteryOptimizationIgnored,
                     enabledCategories = state.notificationCategories,
                     connected = state.connection is BandConnectionState.Connected,
                     onOpenNotificationAccess = onOpenNotificationAccess,
                     onSetCategory = onSetNotificationCategory,
                     onSendTestNotification = onSendTestNotification,
+                    onOpenBatteryOptimization = onOpenBatteryOptimization,
                     modifier = Modifier.padding(padding),
                 )
                 Destination.Personalize -> PersonalizeScreen(
@@ -154,6 +184,8 @@ fun MicrobandApp(
                     onSetThemeColor = onSetThemeColor,
                     onChooseWallpaper = onChooseWallpaper,
                     onClearWallpaper = onClearWallpaper,
+                    onRefreshTiles = onRefreshTiles,
+                    onApplyTiles = onApplyTiles,
                     modifier = Modifier.padding(padding),
                 )
                 Destination.Settings -> SettingsContainer(
@@ -161,6 +193,7 @@ fun MicrobandApp(
                     onSetProtocolLogging = onSetProtocolLogging,
                     onOpenFirmwareArchive = onOpenFirmwareArchive,
                     onChooseFirmwarePackage = onChooseFirmwarePackage,
+                    onStartFirmwareUpdate = onStartFirmwareUpdate,
                     onConnect = onConnect,
                     onDisconnect = onDisconnect,
                     onInspect = onInspect,
@@ -237,6 +270,7 @@ private fun HomeScreen(
     onInspect: () -> Unit,
     onFinishSetup: () -> Unit,
     onSyncClock: () -> Unit,
+    onRefreshHealth: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val connected = state.connection as? BandConnectionState.Connected
@@ -246,11 +280,12 @@ private fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            Text("Your Band", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-            Text("Local-first connection and setup", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Today", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+            Text("Your health data, read directly from the Band", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item { DeviceHeroCard(state.connection, onConnect, onDisconnect, onSyncClock) }
-        item {
+        item { HealthDashboard(state.healthSnapshot, connected != null, state.healthSyncInProgress, onRefreshHealth) }
+        if (connected?.device?.oobeComplete != true) item {
             SetupCard(
                 device = connected?.device,
                 currentStep = state.oobeStep,
@@ -267,6 +302,248 @@ private fun HomeScreen(
         }
     }
 }
+
+@Composable
+private fun HealthDashboard(
+    snapshot: BandHealthSnapshot?,
+    connected: Boolean,
+    syncing: Boolean,
+    onRefresh: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        ) {
+            Column(Modifier.fillMaxWidth().padding(22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(if (snapshot?.daily?.cumulativeSinceReset == true) "BAND STEP COUNTER" else "STEPS TODAY", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                Text(
+                    snapshot?.stepsToday?.let { String.format(Locale.US, "%,d", it) } ?: "—",
+                    style = MaterialTheme.typography.displayMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    snapshot?.let { (if (it.daily?.cumulativeSinceReset == true) "Older firmware reports a cumulative total • " else "") + "Last synced ${healthDate(it.syncedAt)}" }
+                        ?: "Connect and sync to read today's pedometer total.",
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .72f),
+                )
+                Button(onClick = onRefresh, enabled = connected && !syncing, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (syncing) "Syncing…" else "Sync Band data")
+                }
+                if (syncing) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CompactMetric("Distance", snapshot?.daily?.distanceCentimeters?.let { String.format(Locale.US, "%.2f km", it / 100_000.0) } ?: "—", Modifier.weight(1f))
+            CompactMetric("Sleep", snapshot?.lastSleep?.let { durationText(it.timeAsleepMillis) } ?: "—", Modifier.weight(1f))
+        }
+        Text("Open Health for trends and detailed records.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun CompactMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Card(modifier, shape = RoundedCornerShape(18.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+private enum class HealthRange(val label: String, val days: Int) { Day("Day", 1), Week("Week", 7), Month("Month", 30) }
+
+@Composable
+private fun HealthScreen(state: MicrobandUiState, onRefresh: () -> Unit, modifier: Modifier = Modifier) {
+    var rangeOrdinal by rememberSaveable { mutableIntStateOf(HealthRange.Week.ordinal) }
+    var selectedDate by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
+    val range = HealthRange.entries[rangeOrdinal]
+    val history = remember(state.healthHistory, range) {
+        val oldest = LocalDate.now().minusDays((range.days - 1).toLong())
+        state.healthHistory.filter { runCatching { LocalDate.parse(it.localDate) }.getOrNull()?.let { date -> !date.isBefore(oldest) } == true }.sortedBy { it.localDate }
+    }
+    val selectedDay = state.healthHistory.firstOrNull { it.localDate == selectedDate }
+    val connected = state.connection is BandConnectionState.Connected
+    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item {
+            Text("Health", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+            Text("Band readings stay private on this phone", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HealthRange.entries.forEach { option ->
+                    if (range == option) Button({ rangeOrdinal = option.ordinal }, Modifier.weight(1f)) { Text(option.label) }
+                    else FilledTonalButton({ rangeOrdinal = option.ordinal }, Modifier.weight(1f)) { Text(option.label) }
+                }
+            }
+        }
+        item { StepsChart(history, range, selectedDate) { selectedDate = it } }
+        item { DailyHealthCard(selectedDate, selectedDay) }
+        item {
+            Button(onClick = onRefresh, enabled = connected && !state.healthSyncInProgress, modifier = Modifier.fillMaxWidth()) {
+                Text(if (state.healthSyncInProgress) "Syncing…" else "Sync Band data")
+            }
+            if (state.healthSyncInProgress) LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        state.healthSnapshot?.daily?.let { daily ->
+            item {
+                Card(shape = RoundedCornerShape(22.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(if (daily.cumulativeSinceReset) "Band counters" else "Today's totals", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        if (daily.cumulativeSinceReset) Text("This firmware reports totals since its last counter reset, not daily values. These are excluded from trend charts.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        HealthValue("Steps", daily.steps?.let { String.format(Locale.US, "%,d", it) })
+                        HealthValue("Calories", daily.calories?.let { "$it cal" })
+                        HealthValue("Distance", daily.distanceCentimeters?.let { String.format(Locale.US, "%.2f km", it / 100_000.0) })
+                        HealthValue("Floors climbed", daily.flightsAscended?.toString())
+                        HealthValue("Elevation gain", daily.elevationGainCentimeters?.let { String.format(Locale.US, "%.0f m", it / 100.0) })
+                        HealthValue("UV exposure", daily.uvExposure?.toString())
+                    }
+                }
+            }
+        }
+        item { ActivitySummaryCard("Latest run", state.healthSnapshot?.lastRun, showDistance = true) }
+        item { ActivitySummaryCard("Latest exercise", state.healthSnapshot?.lastWorkout, showDistance = false) }
+        item { SleepSummaryCard(state.healthSnapshot?.lastSleep) }
+        if (history.isEmpty()) item {
+            SectionCard("No trend data yet", "Sync while the Band is connected. Microband saves one daily total locally, so weekly and monthly charts build over time.")
+        }
+    }
+}
+
+@Composable
+private fun HealthValue(label: String, value: String?) {
+    Row(Modifier.fillMaxWidth()) {
+        Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value ?: "Not available", fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun StepsChart(
+    history: List<HealthDailyEntity>,
+    range: HealthRange,
+    selectedDate: String,
+    onSelectDate: (String) -> Unit,
+) {
+    val slots = remember(range) {
+        val today = LocalDate.now()
+        (range.days - 1 downTo 0).map { today.minusDays(it.toLong()) }
+    }
+    val byDate = remember(history) { history.associateBy { it.localDate } }
+    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("${range.label} steps", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            val total = history.sumOf { it.steps ?: 0 }
+            Text(String.format(Locale.US, "%,d total", total), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            val barColor = MaterialTheme.colorScheme.primary
+            val emptyColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .12f)
+            val selectedColor = MaterialTheme.colorScheme.onSecondaryContainer
+            Canvas(
+                Modifier.fillMaxWidth().height(150.dp).pointerInput(slots) {
+                    detectTapGestures { offset ->
+                        val index = (offset.x / (size.width / slots.size)).toInt().coerceIn(0, slots.lastIndex)
+                        onSelectDate(slots[index].toString())
+                    }
+                },
+            ) {
+                val maximum = slots.maxOfOrNull { byDate[it.toString()]?.steps ?: 0 }?.coerceAtLeast(1) ?: 1
+                val gap = size.width / slots.size
+                slots.forEachIndexed { index, date ->
+                    val value = byDate[date.toString()]?.steps ?: 0
+                    val height = if (value > 0) size.height * (value.toFloat() / maximum) else 3f
+                    drawRoundRect(
+                        color = if (value > 0) barColor else emptyColor,
+                        topLeft = androidx.compose.ui.geometry.Offset(index * gap + gap * .18f, size.height - height),
+                        size = androidx.compose.ui.geometry.Size(gap * .64f, height),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(gap * .2f),
+                    )
+                    if (date.toString() == selectedDate) {
+                        drawRoundRect(
+                            color = selectedColor,
+                            topLeft = androidx.compose.ui.geometry.Offset(index * gap + gap * .08f, 0f),
+                            size = androidx.compose.ui.geometry.Size(gap * .84f, size.height),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(gap * .2f),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f),
+                        )
+                    }
+                }
+            }
+            Text("Tap a day to see every saved value.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .75f))
+        }
+    }
+}
+
+@Composable
+private fun DailyHealthCard(date: String, day: HealthDailyEntity?) {
+    val title = runCatching {
+        LocalDate.parse(date).format(DateTimeFormatter.ofPattern("EEEE, MMM d"))
+    }.getOrDefault(date)
+    Card(shape = RoundedCornerShape(22.dp)) {
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            HealthValue("Steps", day?.steps?.let { String.format(Locale.US, "%,d", it) })
+            HealthValue("Calories", day?.calories?.let { "$it cal" })
+            HealthValue("Distance", day?.distanceCentimeters?.let { String.format(Locale.US, "%.2f km", it / 100_000.0) })
+            HealthValue("Floors climbed", day?.flightsAscended?.toString())
+            HealthValue("Elevation gain", day?.elevationGainCentimeters?.let { String.format(Locale.US, "%.0f m", it / 100.0) })
+            HealthValue("UV exposure", day?.uvExposure?.toString())
+            Text(
+                day?.let { "Last synced ${healthDate(java.time.Instant.ofEpochMilli(it.syncedAt))}" } ?: "No saved reading for this day",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActivitySummaryCard(title: String, summary: BandActivitySummary?, showDistance: Boolean) {
+    Card(shape = RoundedCornerShape(22.dp)) {
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(summary?.endedAt?.let(::healthDate) ?: "No saved record found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (summary != null) {
+                val metrics = buildList {
+                    add(durationText(summary.durationMillis))
+                    if (showDistance) summary.distanceCentimeters?.let {
+                        add(String.format(Locale.US, "%.2f mi", it / 160_934.4))
+                    }
+                    add("${summary.calories} cal")
+                    if (summary.averageHeartRate > 0) add("${summary.averageHeartRate} avg bpm")
+                }
+                Text(metrics.joinToString("  •  "), style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SleepSummaryCard(summary: BandSleepSummary?) {
+    Card(shape = RoundedCornerShape(22.dp)) {
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text("Latest sleep", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(summary?.endedAt?.let(::healthDate) ?: "No saved sleep found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (summary != null) {
+                val metrics = buildList {
+                    add("${durationText(summary.timeAsleepMillis)} asleep")
+                    add("${summary.timesWokeUp} wake-ups")
+                    if (summary.restingHeartRate > 0) add("${summary.restingHeartRate} resting bpm")
+                }
+                Text(metrics.joinToString("  •  "), style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+    }
+}
+
+private fun durationText(milliseconds: Long): String {
+    val totalMinutes = milliseconds / 60_000
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
+}
+
+private fun healthDate(instant: java.time.Instant): String =
+    DateTimeFormatter.ofPattern("MMM d, h:mm a").withZone(ZoneId.systemDefault()).format(instant)
 
 @Composable
 private fun DeviceHeroCard(
@@ -372,11 +649,13 @@ private fun StatusRow(done: Boolean, label: String) {
 @Composable
 private fun NotificationsScreen(
     accessGranted: Boolean,
+    batteryOptimizationIgnored: Boolean,
     enabledCategories: Set<String>,
     connected: Boolean,
     onOpenNotificationAccess: () -> Unit,
     onSetCategory: (String, Boolean) -> Unit,
     onSendTestNotification: () -> Unit,
+    onOpenBatteryOptimization: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -386,6 +665,28 @@ private fun NotificationsScreen(
         }
         item {
             SectionCard("Private by default", "Notification access is optional. Persistent system notifications and duplicate updates are never forwarded.")
+        }
+        item {
+            Card(shape = RoundedCornerShape(18.dp)) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Background forwarding", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Microband's screen does not need to stay open. Android runs its notification listener in the background, but some phones restrict it to save power.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    StatusRow(batteryOptimizationIgnored, if (batteryOptimizationIgnored) "Battery optimization disabled" else "Battery optimization may interrupt forwarding")
+                    if (!batteryOptimizationIgnored) {
+                        Button(onClick = onOpenBatteryOptimization, modifier = Modifier.fillMaxWidth()) {
+                            Text("Allow background operation")
+                        }
+                    }
+                    Text(
+                        "If your phone has an App battery usage or Auto-start page, set Microband to Unrestricted and allow background activity there too.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
         item {
             Card(shape = RoundedCornerShape(18.dp)) {
@@ -430,13 +731,21 @@ private fun NotificationsScreen(
 private data class ThemePreset(val name: String, val accent: Int)
 
 private val themePresets = listOf(
-    ThemePreset("Microsoft blue", 0xFF0078D7.toInt()),
-    ThemePreset("Cyan", 0xFF00A4EF.toInt()),
+    ThemePreset("Red", 0xFFE81123.toInt()),
+    ThemePreset("Coral", 0xFFFF6F61.toInt()),
+    ThemePreset("Amber", 0xFFFF8C00.toInt()),
+    ThemePreset("Gold", 0xFFFFC83D.toInt()),
+    ThemePreset("Lime", 0xFF107C10.toInt()),
     ThemePreset("Emerald", 0xFF008272.toInt()),
-    ThemePreset("Lime", 0xFF6B9F00.toInt()),
-    ThemePreset("Orange", 0xFFF7630C.toInt()),
-    ThemePreset("Magenta", 0xFFE3008C.toInt()),
+    ThemePreset("Teal", 0xFF00B7C3.toInt()),
+    ThemePreset("Cyan", 0xFF00A4EF.toInt()),
+    ThemePreset("Microsoft blue", 0xFF0078D7.toInt()),
+    ThemePreset("Indigo", 0xFF4F6BED.toInt()),
     ThemePreset("Violet", 0xFF744DA9.toInt()),
+    ThemePreset("Purple", 0xFF881798.toInt()),
+    ThemePreset("Magenta", 0xFFE3008C.toInt()),
+    ThemePreset("Rose", 0xFFC239B3.toInt()),
+    ThemePreset("Brown", 0xFF8E562E.toInt()),
     ThemePreset("Graphite", 0xFF5D5A58.toInt()),
 )
 
@@ -446,9 +755,25 @@ private fun PersonalizeScreen(
     onSetThemeColor: (Int) -> Unit,
     onChooseWallpaper: () -> Unit,
     onClearWallpaper: () -> Unit,
+    onRefreshTiles: () -> Unit,
+    onApplyTiles: (List<BandTileInfo>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val connected = state.connection is BandConnectionState.Connected
+    var tileDraft by remember { mutableStateOf<List<BandTileInfo>>(emptyList()) }
+    LaunchedEffect(connected) { if (connected) onRefreshTiles() }
+    LaunchedEffect(state.tiles.installed) { tileDraft = state.tiles.installed }
+    var showCustomColor by rememberSaveable { mutableStateOf(false) }
+    if (showCustomColor) {
+        CustomColorDialog(
+            initialAccent = state.themeAccent,
+            onDismiss = { showCustomColor = false },
+            onApply = {
+                showCustomColor = false
+                onSetThemeColor(it)
+            },
+        )
+    }
     LazyColumn(
         modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
@@ -485,8 +810,23 @@ private fun PersonalizeScreen(
                             }
                         }
                     }
+                    Text(
+                        "Selected: #${String.format(Locale.US, "%06X", state.themeAccent and 0xFFFFFF)}",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    FilledTonalButton(
+                        onClick = { showCustomColor = true },
+                        enabled = connected,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Choose custom color") }
                 }
             }
+        }
+        item {
+            SectionCard(
+                "Display wake behavior",
+                "Band 2 does not provide a double-tap-to-wake mode. For its supported clock modes, open Settings on the Band, then Watch Mode, and choose Off, Rotate On, or Always On. Always On uses noticeably more battery.",
+            )
         }
         item {
             Card(shape = RoundedCornerShape(24.dp)) {
@@ -510,7 +850,123 @@ private fun PersonalizeScreen(
                 }
             }
         }
+        item {
+            TileManagerCard(
+                connected = connected,
+                installed = tileDraft,
+                available = (state.tiles.installed + state.tiles.available).distinctBy { it.id },
+                capacity = state.tiles.capacity,
+                onInstalledChange = { tileDraft = it },
+                onRefresh = onRefreshTiles,
+                onApply = { onApplyTiles(tileDraft) },
+            )
+        }
     }
+}
+
+@Composable
+private fun TileManagerCard(
+    connected: Boolean,
+    installed: List<BandTileInfo>,
+    available: List<BandTileInfo>,
+    capacity: Int,
+    onInstalledChange: (List<BandTileInfo>) -> Unit,
+    onRefresh: () -> Unit,
+    onApply: () -> Unit,
+) {
+    Card(shape = RoundedCornerShape(24.dp)) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Band tiles", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (capacity > 0) "${installed.size} of $capacity tile slots in use" else "Connect to load the Band's tiles",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            installed.forEachIndexed { index, tile ->
+                val protected = tile.name.equals("Me", true) || tile.name.equals("Settings", true)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(tile.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    IconButton(
+                        onClick = {
+                            val changed = installed.toMutableList()
+                            changed.add(index - 1, changed.removeAt(index))
+                            onInstalledChange(changed)
+                        },
+                        enabled = index > 0,
+                    ) { Icon(Icons.Rounded.ArrowUpward, "Move ${tile.name} up") }
+                    IconButton(
+                        onClick = {
+                            val changed = installed.toMutableList()
+                            changed.add(index + 1, changed.removeAt(index))
+                            onInstalledChange(changed)
+                        },
+                        enabled = index < installed.lastIndex,
+                    ) { Icon(Icons.Rounded.ArrowDownward, "Move ${tile.name} down") }
+                    IconButton(
+                        onClick = { onInstalledChange(installed.filterNot { it.id == tile.id }) },
+                        enabled = !protected && installed.size > 1,
+                    ) { Icon(Icons.Rounded.Remove, "Remove ${tile.name}") }
+                }
+            }
+            if (available.isNotEmpty()) {
+                HorizontalDivider()
+                Text("Available tiles", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                available.filter { candidate -> installed.none { it.id == candidate.id } }.forEach { tile ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(tile.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        IconButton(
+                            onClick = { onInstalledChange(installed + tile) },
+                            enabled = capacity > 0 && installed.size < capacity,
+                        ) { Icon(Icons.Rounded.Add, "Add ${tile.name}") }
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = onRefresh, enabled = connected, modifier = Modifier.weight(1f)) { Text("Reload") }
+                Button(
+                    onClick = onApply,
+                    enabled = connected && installed.isNotEmpty(),
+                    modifier = Modifier.weight(1f),
+                ) { Text("Apply tiles") }
+            }
+            Text("Me and Settings stay enabled so the Band remains usable.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun CustomColorDialog(
+    initialAccent: Int,
+    onDismiss: () -> Unit,
+    onApply: (Int) -> Unit,
+) {
+    val initialHsv = remember(initialAccent) {
+        FloatArray(3).also { android.graphics.Color.colorToHSV(initialAccent, it) }
+    }
+    var hue by rememberSaveable { mutableFloatStateOf(initialHsv[0]) }
+    var saturation by rememberSaveable { mutableFloatStateOf(initialHsv[1]) }
+    var brightness by rememberSaveable { mutableFloatStateOf(initialHsv[2]) }
+    val color = android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, brightness))
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Custom theme color") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(18.dp)).background(Color(color)),
+                )
+                Text("#${String.format(Locale.US, "%06X", color and 0xFFFFFF)}", fontFamily = FontFamily.Monospace)
+                Text("Hue", style = MaterialTheme.typography.labelLarge)
+                Slider(value = hue, onValueChange = { hue = it }, valueRange = 0f..360f)
+                Text("Saturation", style = MaterialTheme.typography.labelLarge)
+                Slider(value = saturation, onValueChange = { saturation = it }, valueRange = 0f..1f)
+                Text("Brightness", style = MaterialTheme.typography.labelLarge)
+                Slider(value = brightness, onValueChange = { brightness = it }, valueRange = 0.1f..1f)
+            }
+        },
+        confirmButton = { TextButton(onClick = { onApply(color) }) { Text("Apply") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -519,6 +975,7 @@ private fun SettingsContainer(
     onSetProtocolLogging: (Boolean) -> Unit,
     onOpenFirmwareArchive: () -> Unit,
     onChooseFirmwarePackage: () -> Unit,
+    onStartFirmwareUpdate: () -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onInspect: () -> Unit,
@@ -530,7 +987,7 @@ private fun SettingsContainer(
     if (developerOpen) {
         DebugScreen(state, onConnect, onDisconnect, onInspect, onClearLog, onRefresh, { developerOpen = false }, modifier)
     } else {
-        SettingsScreen(state, onSetProtocolLogging, onOpenFirmwareArchive, onChooseFirmwarePackage, { developerOpen = true }, modifier)
+        SettingsScreen(state, onSetProtocolLogging, onOpenFirmwareArchive, onChooseFirmwarePackage, onStartFirmwareUpdate, { developerOpen = true }, modifier)
     }
 }
 
@@ -540,6 +997,7 @@ private fun SettingsScreen(
     onSetProtocolLogging: (Boolean) -> Unit,
     onOpenFirmwareArchive: () -> Unit,
     onChooseFirmwarePackage: () -> Unit,
+    onStartFirmwareUpdate: () -> Unit,
     onOpenDeveloper: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -560,8 +1018,10 @@ private fun SettingsScreen(
             FirmwareCard(
                 (state.connection as? BandConnectionState.Connected)?.device,
                 state.firmwarePackageStatus,
+                state.firmwareUpdate,
                 onOpenFirmwareArchive,
                 onChooseFirmwarePackage,
+                onStartFirmwareUpdate,
             )
         }
         item {
@@ -569,7 +1029,7 @@ private fun SettingsScreen(
                 Text("Open Developer tools")
             }
         }
-        item { Text("Microband 0.2.0", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Microband 0.5.0", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
@@ -631,10 +1091,29 @@ private fun NewcomerTipsCarousel() {
 private fun FirmwareCard(
     device: BandDeviceInfo?,
     packageStatus: String?,
+    updateStatus: com.unsame.microband.band.model.FirmwareUpdateStatus,
     onOpenFirmwareArchive: () -> Unit,
     onChooseFirmwarePackage: () -> Unit,
+    onStartFirmwareUpdate: () -> Unit,
 ) {
     val latestKnown = "2.0.5202.0"
+    var showWarning by rememberSaveable { mutableStateOf(false) }
+    if (showWarning) {
+        AlertDialog(
+            onDismissRequest = { showWarning = false },
+            title = { Text("Firmware update warning") },
+            text = {
+                Text("A firmware update can permanently damage or brick the Band if it is interrupted. Keep the Band charging, keep the phone nearby, and do not close Microband. You accept responsibility for any damage. Microband is community software and is not affiliated with Microsoft.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showWarning = false
+                    onStartFirmwareUpdate()
+                }) { Text("I understand — update") }
+            },
+            dismissButton = { TextButton(onClick = { showWarning = false }) { Text("Cancel") } },
+        )
+    }
     Card(shape = RoundedCornerShape(22.dp)) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Band firmware", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
@@ -650,8 +1129,29 @@ private fun FirmwareCard(
             FilledTonalButton(onClick = onOpenFirmwareArchive) { Text("Open firmware archive") }
             FilledTonalButton(onClick = onChooseFirmwarePackage) { Text("Validate downloaded package") }
             packageStatus?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+            if (updateStatus.stage != FirmwareUpdateStage.Idle) {
+                Text(updateStatus.message, color = if (updateStatus.stage == FirmwareUpdateStage.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                if (updateStatus.isRunning) LinearProgressIndicator(
+                    progress = { updateStatus.percent / 100f },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Button(
+                onClick = { showWarning = true },
+                enabled = device != null && device.firmwareVersion != latestKnown && !updateStatus.isRunning,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    when {
+                        updateStatus.isRunning -> "Updating • ${updateStatus.percent}%"
+                        device?.firmwareVersion == latestKnown -> "Latest firmware installed"
+                        device == null -> "Connect Band to update"
+                        else -> "Download and install $latestKnown"
+                    },
+                )
+            }
             Text(
-                "Microband validates the exact Band 2 image before use. Flashing remains disabled until battery and recovery safeguards are hardware-tested.",
+                "Microband downloads the archived image, verifies its exact size and SHA-256 checksum, requires at least 50% battery, and verifies the Band after restart.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

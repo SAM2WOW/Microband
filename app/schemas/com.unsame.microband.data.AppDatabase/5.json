@@ -1,0 +1,290 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 5,
+    "identityHash": "dd2ea678b228474c73d9ebd317bbf168",
+    "entities": [
+      {
+        "tableName": "protocol_packet_log",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `timestampMillis` INTEGER NOT NULL, `direction` TEXT NOT NULL, `transport` TEXT NOT NULL, `commandId` INTEGER, `payloadLength` INTEGER NOT NULL, `hexPayload` TEXT NOT NULL, `parsedStatus` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampMillis",
+            "columnName": "timestampMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transport",
+            "columnName": "transport",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "commandId",
+            "columnName": "commandId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "payloadLength",
+            "columnName": "payloadLength",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hexPayload",
+            "columnName": "hexPayload",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parsedStatus",
+            "columnName": "parsedStatus",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "health_snapshot",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `syncedAt` INTEGER NOT NULL, `stepsToday` INTEGER, `dailyIsCumulative` INTEGER NOT NULL, `dailyCalories` INTEGER, `dailyDistanceCentimeters` INTEGER, `dailyFlightsAscended` INTEGER, `dailyElevationGainCentimeters` INTEGER, `dailyUvExposure` INTEGER, `runStartedAt` INTEGER, `runEndedAt` INTEGER, `runDuration` INTEGER, `runDistance` INTEGER, `runCalories` INTEGER, `runAverageHeartRate` INTEGER, `runMaximumHeartRate` INTEGER, `workoutStartedAt` INTEGER, `workoutEndedAt` INTEGER, `workoutDuration` INTEGER, `workoutCalories` INTEGER, `workoutAverageHeartRate` INTEGER, `workoutMaximumHeartRate` INTEGER, `sleepStartedAt` INTEGER, `sleepEndedAt` INTEGER, `sleepDuration` INTEGER, `sleepTimeAsleep` INTEGER, `sleepTimesWokeUp` INTEGER, `sleepCalories` INTEGER, `sleepRestingHeartRate` INTEGER, `sleepTimeToFallAsleep` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncedAt",
+            "columnName": "syncedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stepsToday",
+            "columnName": "stepsToday",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "dailyIsCumulative",
+            "columnName": "dailyIsCumulative",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dailyCalories",
+            "columnName": "dailyCalories",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "dailyDistanceCentimeters",
+            "columnName": "dailyDistanceCentimeters",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "dailyFlightsAscended",
+            "columnName": "dailyFlightsAscended",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "dailyElevationGainCentimeters",
+            "columnName": "dailyElevationGainCentimeters",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "dailyUvExposure",
+            "columnName": "dailyUvExposure",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "runStartedAt",
+            "columnName": "runStartedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "runEndedAt",
+            "columnName": "runEndedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "runDuration",
+            "columnName": "runDuration",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "runDistance",
+            "columnName": "runDistance",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "runCalories",
+            "columnName": "runCalories",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "runAverageHeartRate",
+            "columnName": "runAverageHeartRate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "runMaximumHeartRate",
+            "columnName": "runMaximumHeartRate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "workoutStartedAt",
+            "columnName": "workoutStartedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "workoutEndedAt",
+            "columnName": "workoutEndedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "workoutDuration",
+            "columnName": "workoutDuration",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "workoutCalories",
+            "columnName": "workoutCalories",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "workoutAverageHeartRate",
+            "columnName": "workoutAverageHeartRate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "workoutMaximumHeartRate",
+            "columnName": "workoutMaximumHeartRate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sleepStartedAt",
+            "columnName": "sleepStartedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sleepEndedAt",
+            "columnName": "sleepEndedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sleepDuration",
+            "columnName": "sleepDuration",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sleepTimeAsleep",
+            "columnName": "sleepTimeAsleep",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sleepTimesWokeUp",
+            "columnName": "sleepTimesWokeUp",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sleepCalories",
+            "columnName": "sleepCalories",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sleepRestingHeartRate",
+            "columnName": "sleepRestingHeartRate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sleepTimeToFallAsleep",
+            "columnName": "sleepTimeToFallAsleep",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "health_daily",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`localDate` TEXT NOT NULL, `syncedAt` INTEGER NOT NULL, `steps` INTEGER, `calories` INTEGER, `distanceCentimeters` INTEGER, `flightsAscended` INTEGER, `elevationGainCentimeters` INTEGER, `uvExposure` INTEGER, PRIMARY KEY(`localDate`))",
+        "fields": [
+          {
+            "fieldPath": "localDate",
+            "columnName": "localDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncedAt",
+            "columnName": "syncedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "steps",
+            "columnName": "steps",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "calories",
+            "columnName": "calories",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "distanceCentimeters",
+            "columnName": "distanceCentimeters",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "flightsAscended",
+            "columnName": "flightsAscended",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "elevationGainCentimeters",
+            "columnName": "elevationGainCentimeters",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "uvExposure",
+            "columnName": "uvExposure",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "localDate"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'dd2ea678b228474c73d9ebd317bbf168')"
+    ]
+  }
+}

@@ -14,6 +14,8 @@ class MicrobandApplication : Application() {
         BandConnectionManager(
             application = this,
             packetLogDao = database.packetLogDao(),
+            healthSnapshotDao = database.healthSnapshotDao(),
+            healthDailyDao = database.healthDailyDao(),
             preferences = preferences,
         )
     }

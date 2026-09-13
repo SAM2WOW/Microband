@@ -3,12 +3,17 @@ package com.unsame.microband.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.core.app.NotificationManagerCompat
 import com.unsame.microband.band.model.BandConnectionState
+import com.unsame.microband.band.model.BandHealthSnapshot
+import com.unsame.microband.band.model.BandTileCatalog
+import com.unsame.microband.band.model.BandTileInfo
+import com.unsame.microband.band.model.FirmwareUpdateStatus
 import com.unsame.microband.band.personalization.BandWallpaperProcessor
 import com.unsame.microband.band.oobe.BandOobeStep
 import com.unsame.microband.bluetooth.BandAssociation
@@ -18,6 +23,8 @@ import com.unsame.microband.bluetooth.BluetoothPermissionManager
 import com.unsame.microband.bluetooth.BluetoothPermissionState
 import com.unsame.microband.data.MicrobandPreferences
 import com.unsame.microband.data.ProtocolPacketLog
+import com.unsame.microband.data.HealthDailyEntity
+import com.unsame.microband.firmware.FirmwareUpdateService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,8 +49,14 @@ data class MicrobandUiState(
     val firmwarePackageStatus: String? = null,
     val notificationAccessGranted: Boolean = false,
     val notificationCategories: Set<String> = emptySet(),
+    val batteryOptimizationIgnored: Boolean = false,
+    val healthSnapshot: BandHealthSnapshot? = null,
+    val healthSyncInProgress: Boolean = false,
+    val healthHistory: List<HealthDailyEntity> = emptyList(),
     val themeAccent: Int = 0xFF0078D7.toInt(),
     val personalizationBusy: Boolean = false,
+    val firmwareUpdate: FirmwareUpdateStatus = FirmwareUpdateStatus(),
+    val tiles: BandTileCatalog = BandTileCatalog(),
 )
 
 class MicrobandViewModel(
@@ -59,8 +72,14 @@ class MicrobandViewModel(
         viewModelScope.launch { connectionManager.oobeStep.collect { value -> mutableState.update { it.copy(oobeStep = value) } } }
         viewModelScope.launch { connectionManager.setupInProgress.collect { value -> mutableState.update { it.copy(setupInProgress = value) } } }
         viewModelScope.launch { connectionManager.recentLogs.collect { value -> mutableState.update { it.copy(logs = value) } } }
+        viewModelScope.launch { connectionManager.healthSnapshot.collect { value -> mutableState.update { it.copy(healthSnapshot = value) } } }
+        viewModelScope.launch { connectionManager.healthSyncInProgress.collect { value -> mutableState.update { it.copy(healthSyncInProgress = value) } } }
+        viewModelScope.launch { connectionManager.healthHistory.collect { value -> mutableState.update { it.copy(healthHistory = value) } } }
+        viewModelScope.launch { connectionManager.firmwareUpdate.collect { value -> mutableState.update { it.copy(firmwareUpdate = value) } } }
+        viewModelScope.launch { connectionManager.tiles.collect { value -> mutableState.update { it.copy(tiles = value) } } }
         viewModelScope.launch { preferences.protocolLogging.collect { value -> mutableState.update { it.copy(protocolLogging = value) } } }
         viewModelScope.launch { preferences.notificationCategories.collect { value -> mutableState.update { it.copy(notificationCategories = value) } } }
+        viewModelScope.launch { preferences.themeAccent.collect { value -> mutableState.update { it.copy(themeAccent = value) } } }
         viewModelScope.launch { connectionManager.events.collect { value -> mutableState.update { it.copy(message = value) } } }
     }
 
@@ -77,6 +96,12 @@ class MicrobandViewModel(
                     else -> it.connection
                 },
             )
+        }
+        if (association != null &&
+            mutableState.value.connection !is BandConnectionState.Connected &&
+            mutableState.value.connection !is BandConnectionState.Connecting
+        ) {
+            connectionManager.connect(association.device)
         }
     }
 
@@ -160,14 +185,38 @@ class MicrobandViewModel(
         mutableState.update { it.copy(notificationAccessGranted = granted) }
     }
 
+    fun refreshBackgroundStatus(context: Context) {
+        val power = context.getSystemService(PowerManager::class.java)
+        mutableState.update {
+            it.copy(batteryOptimizationIgnored = power?.isIgnoringBatteryOptimizations(context.packageName) == true)
+        }
+    }
+
+    fun openBatteryOptimizationSettings(context: Context) {
+        val intent = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:${context.packageName}"),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }.onFailure {
+            context.startActivity(
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+
     fun setNotificationCategory(category: String, enabled: Boolean) = viewModelScope.launch {
         preferences.setNotificationCategory(category, enabled)
     }
 
     fun sendTestNotification() = connectionManager.sendTestNotification()
+    fun refreshHealthData() = connectionManager.refreshHealthData()
+    fun refreshTiles() = connectionManager.refreshTiles()
+    fun applyTiles(tiles: List<BandTileInfo>) = connectionManager.applyTiles(tiles)
+    fun startFirmwareUpdate(context: Context) = FirmwareUpdateService.start(context)
 
     fun setThemeColor(accent: Int) {
         mutableState.update { it.copy(themeAccent = accent) }
+        viewModelScope.launch { preferences.setThemeAccent(accent) }
         connectionManager.setThemeColor(accent)
     }
 

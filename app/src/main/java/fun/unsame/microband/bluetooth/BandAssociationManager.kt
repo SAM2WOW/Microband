@@ -78,7 +78,7 @@ class BandAssociationManager(
         if (Build.VERSION.SDK_INT >= 33) {
             val preferredId = preferences.associationId.first()
             val info = manager.myAssociations.firstOrNull { it.id == preferredId }
-                ?: manager.myAssociations.firstOrNull()
+                ?: manager.myAssociations.maxByOrNull { it.id }
             if (info != null) {
                 val address = info.deviceMacAddress?.toString()?.let(::normalizeBluetoothAddress)
                 if (address != null) {

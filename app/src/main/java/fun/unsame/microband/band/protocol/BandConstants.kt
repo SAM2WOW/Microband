@@ -10,11 +10,14 @@ object BandConstants {
     const val FACILITY_TIME = 0x75
     const val FACILITY_JUTIL = 0x76
     const val FACILITY_CONFIGURATION = 0x78
+    const val FACILITY_REMOTE_SUBSCRIPTION = 0x8F
+    const val FACILITY_SRAM_FIRMWARE_UPDATE = 0x98
     const val FACILITY_OOBE = 0xAD
     const val FACILITY_FIREBALL_UI = 0xC3
     const val FACILITY_PROFILE = 0xC5
     const val FACILITY_SYSTEM_SETTINGS = 0xCA
     const val FACILITY_NOTIFICATION = 0xCC
+    const val FACILITY_PERSISTED_STATISTICS = 0xCE
     const val FACILITY_INSTALLED_APP_LIST = 0xD4
     const val FACILITY_THEME_COLOR = 0xD8
 }
