@@ -11,6 +11,13 @@ data class BandPhoneNotification(
     val timestamp: Instant,
 )
 
+data class NotificationAppInfo(
+    val packageName: String,
+    val label: String,
+    val notificationCount: Int = 0,
+    val lastNotificationAt: Long = 0,
+)
+
 enum class BandNotificationKind {
     MESSAGE,
     INCOMING_CALL,

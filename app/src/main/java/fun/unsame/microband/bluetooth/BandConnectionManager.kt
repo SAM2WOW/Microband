@@ -131,12 +131,15 @@ class BandConnectionManager(
     @android.annotation.SuppressLint("MissingPermission")
     fun connect(device: BluetoothDevice) = scope.launch {
         keepConnected = true
-        connectionMutex.withLock {
+        val newlyConnected = connectionMutex.withLock {
             activeDevice = device
-            if (mutableState.value is BandConnectionState.Connected && runCatching { protocol.getUtcTime() }.isSuccess) return@withLock
-            runCatching { connectLocked(device) }
-                .onFailure { mutableState.value = BandConnectionState.Error(it.userMessage()) }
+            if (mutableState.value is BandConnectionState.Connected && runCatching { protocol.getUtcTime() }.isSuccess) return@withLock false
+            runCatching { connectLocked(device) }.fold(
+                onSuccess = { true },
+                onFailure = { mutableState.value = BandConnectionState.Error(it.userMessage()); false },
+            )
         }
+        if (newlyConnected) syncAfterConnect()
     }
 
     @android.annotation.SuppressLint("MissingPermission")
@@ -151,10 +154,22 @@ class BandConnectionManager(
         // prevent basic time/notification operations.
         runCatching { protocol.checkSdkCompatibility() }
         try {
-            val info = inspectConnectedBand(name)
-            if (info.oobeComplete == true) syncClockInternal(info)
+            inspectConnectedBand(name)
         } catch (exception: Exception) {
             mutableEvents.emit("Connected. Device checks will retry automatically: ${exception.userMessage()}")
+        }
+    }
+
+    private suspend fun syncAfterConnect() {
+        val info = inspectedInfo ?: return
+        if (info.oobeComplete != true) return
+        runCatching { syncClockInternal(info) }
+        mutableHealthSyncInProgress.value = true
+        try {
+            runCatching { refreshHealthInternal() }
+                .onFailure { mutableEvents.emit("Connected, but health sync failed: ${it.userMessage()}") }
+        } finally {
+            mutableHealthSyncInProgress.value = false
         }
     }
 

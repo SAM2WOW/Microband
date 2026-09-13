@@ -52,41 +52,47 @@ object BandHealthCodec {
     fun run(bytes: ByteArray): BandActivitySummary {
         require(bytes.size == RUN_STATISTICS_SIZE)
         require(BandPacketCodec.readShort(bytes, 8) > 0) { "No saved run" }
+        val duration = uint32(bytes, 10)
+        val endedAt = fileTime(bytes, 38)
         return BandActivitySummary(
-            startedAt = fileTime(bytes, 0),
-            durationMillis = uint32(bytes, 10),
+            startedAt = endedAt?.minusMillis(duration),
+            durationMillis = duration,
             distanceCentimeters = uint32(bytes, 14),
             calories = uint32(bytes, 26),
             averageHeartRate = uint32(bytes, 30),
             maximumHeartRate = uint32(bytes, 34),
-            endedAt = fileTime(bytes, 38),
+            endedAt = endedAt,
         ).validated("run")
     }
 
     fun workout(bytes: ByteArray): BandActivitySummary {
         require(bytes.size == WORKOUT_STATISTICS_SIZE)
         require(BandPacketCodec.readShort(bytes, 8) > 0) { "No saved workout" }
+        val duration = uint32(bytes, 10)
+        val endedAt = fileTime(bytes, 26)
         return BandActivitySummary(
-            startedAt = fileTime(bytes, 0),
-            durationMillis = uint32(bytes, 10),
+            startedAt = endedAt?.minusMillis(duration),
+            durationMillis = duration,
             calories = uint32(bytes, 14),
             averageHeartRate = uint32(bytes, 18),
             maximumHeartRate = uint32(bytes, 22),
-            endedAt = fileTime(bytes, 26),
+            endedAt = endedAt,
         ).validated("workout")
     }
 
     fun sleep(bytes: ByteArray): BandSleepSummary {
         require(bytes.size == SLEEP_STATISTICS_SIZE)
         require(BandPacketCodec.readShort(bytes, 8) > 0) { "No saved sleep" }
+        val duration = uint32(bytes, 10)
+        val endedAt = fileTime(bytes, 38)
         return BandSleepSummary(
-            startedAt = fileTime(bytes, 0),
-            durationMillis = uint32(bytes, 10),
+            startedAt = endedAt?.minusMillis(duration),
+            durationMillis = duration,
             timesWokeUp = uint32(bytes, 14),
             timeAsleepMillis = uint32(bytes, 22),
             calories = uint32(bytes, 26),
             restingHeartRate = uint32(bytes, 30),
-            endedAt = fileTime(bytes, 38),
+            endedAt = endedAt,
             timeToFallAsleepMillis = uint32(bytes, 46),
         ).also {
             require(it.startedAt != null && it.endedAt != null && !it.endedAt.isBefore(it.startedAt)) { "Invalid sleep timestamps" }

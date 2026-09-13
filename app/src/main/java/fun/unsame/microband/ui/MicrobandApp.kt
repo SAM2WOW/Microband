@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -12,11 +13,13 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -40,23 +43,56 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.DirectionsRun
+import androidx.compose.material.icons.rounded.DirectionsWalk
+import androidx.compose.material.icons.rounded.FitnessCenter
+import androidx.compose.material.icons.rounded.LocalFireDepartment
+import androidx.compose.material.icons.rounded.MonitorHeart
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Stairs
+import androidx.compose.material.icons.rounded.Straighten
+import androidx.compose.material.icons.rounded.Terrain
+import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.DirectionsBike
+import androidx.compose.material.icons.rounded.Email
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.GolfCourse
+import androidx.compose.material.icons.rounded.LocalCafe
+import androidx.compose.material.icons.rounded.Mail
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.NotificationsOff
+import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.ShowChart
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -71,7 +107,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -90,7 +128,8 @@ import com.unsame.microband.band.model.FirmwareUpdateStage
 import com.unsame.microband.band.oobe.BandOobeStep
 import com.unsame.microband.data.ProtocolPacketLog
 import com.unsame.microband.data.HealthDailyEntity
-import com.unsame.microband.notification.NotificationCategory
+import com.unsame.microband.notification.NotificationAppInfo
+import androidx.core.graphics.drawable.toBitmap
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -99,7 +138,6 @@ import java.util.Locale
 private enum class Destination(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Rounded.Home),
     Health("Health", Icons.Rounded.Favorite),
-    Notifications("Notifications", Icons.Rounded.Notifications),
     Personalize("Personalize", Icons.Rounded.Palette),
     Settings("Settings", Icons.Rounded.Settings),
 }
@@ -118,7 +156,8 @@ fun MicrobandApp(
     onSetProtocolLogging: (Boolean) -> Unit,
     onRefresh: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
-    onSetNotificationCategory: (String, Boolean) -> Unit,
+    onSetNotificationPackage: (String, Boolean) -> Unit,
+    onSetAllNotifications: (Boolean) -> Unit,
     onSendTestNotification: () -> Unit,
     onOpenBatteryOptimization: () -> Unit,
     onRefreshHealth: () -> Unit,
@@ -149,46 +188,49 @@ fun MicrobandApp(
 
     var selected by rememberSaveable { mutableIntStateOf(0) }
     val destinations = Destination.entries
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
-        bottomBar = {
-            NavigationBar {
-                destinations.forEachIndexed { index, destination ->
-                    NavigationBarItem(
-                        selected = selected == index,
-                        onClick = { selected = index },
-                        icon = { Icon(destination.icon, contentDescription = destination.label) },
-                        label = { Text(destination.label) },
-                    )
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val expanded = maxWidth >= 700.dp
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbar) },
+            bottomBar = {
+                if (!expanded) NavigationBar {
+                    destinations.forEachIndexed { index, destination ->
+                        NavigationBarItem(
+                            selected = selected == index,
+                            onClick = { selected = index },
+                            icon = { Icon(destination.icon, contentDescription = destination.label) },
+                            label = { Text(destination.label) },
+                        )
+                    }
                 }
-            }
-        },
-    ) { padding ->
-        AnimatedContent(targetState = destinations[selected], label = "destination") { destination ->
-            when (destination) {
-                Destination.Home -> HomeScreen(state, onConnect, onDisconnect, onInspect, onFinishSetup, onSyncClock, onRefreshHealth, Modifier.padding(padding))
-                Destination.Health -> HealthScreen(state, onRefreshHealth, Modifier.padding(padding))
-                Destination.Notifications -> NotificationsScreen(
-                    accessGranted = state.notificationAccessGranted,
-                    batteryOptimizationIgnored = state.batteryOptimizationIgnored,
-                    enabledCategories = state.notificationCategories,
-                    connected = state.connection is BandConnectionState.Connected,
-                    onOpenNotificationAccess = onOpenNotificationAccess,
-                    onSetCategory = onSetNotificationCategory,
-                    onSendTestNotification = onSendTestNotification,
-                    onOpenBatteryOptimization = onOpenBatteryOptimization,
-                    modifier = Modifier.padding(padding),
-                )
-                Destination.Personalize -> PersonalizeScreen(
+            },
+        ) { padding ->
+            Row(Modifier.fillMaxSize().padding(padding)) {
+                if (expanded) NavigationRail(Modifier.fillMaxHeight()) {
+                    Spacer(Modifier.height(12.dp))
+                    destinations.forEachIndexed { index, destination ->
+                        NavigationRailItem(
+                            selected = selected == index,
+                            onClick = { selected = index },
+                            icon = { Icon(destination.icon, contentDescription = destination.label) },
+                            label = { Text(destination.label) },
+                        )
+                    }
+                }
+                AnimatedContent(targetState = destinations[selected], label = "destination", modifier = Modifier.weight(1f)) { destination ->
+                    when (destination) {
+                        Destination.Home -> HomeScreen(state, onConnect, onDisconnect, onInspect, onFinishSetup, onSyncClock, onRefreshHealth)
+                        Destination.Health -> HealthScreen(state, onRefreshHealth)
+                        Destination.Personalize -> PersonalizeScreen(
                     state = state,
                     onSetThemeColor = onSetThemeColor,
                     onChooseWallpaper = onChooseWallpaper,
                     onClearWallpaper = onClearWallpaper,
                     onRefreshTiles = onRefreshTiles,
                     onApplyTiles = onApplyTiles,
-                    modifier = Modifier.padding(padding),
+                    modifier = Modifier,
                 )
-                Destination.Settings -> SettingsContainer(
+                        Destination.Settings -> SettingsContainer(
                     state = state,
                     onSetProtocolLogging = onSetProtocolLogging,
                     onOpenFirmwareArchive = onOpenFirmwareArchive,
@@ -199,8 +241,15 @@ fun MicrobandApp(
                     onInspect = onInspect,
                     onClearLog = onClearLog,
                     onRefresh = onRefresh,
-                    modifier = Modifier.padding(padding),
+                    onOpenNotificationAccess = onOpenNotificationAccess,
+                    onSetNotificationPackage = onSetNotificationPackage,
+                    onSetAllNotifications = onSetAllNotifications,
+                    onSendTestNotification = onSendTestNotification,
+                    onOpenBatteryOptimization = onOpenBatteryOptimization,
+                    modifier = Modifier,
                 )
+                    }
+                }
             }
         }
     }
@@ -281,7 +330,6 @@ private fun HomeScreen(
     ) {
         item {
             Text("Today", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-            Text("Your health data, read directly from the Band", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item { DeviceHeroCard(state.connection, onConnect, onDisconnect, onSyncClock) }
         item { HealthDashboard(state.healthSnapshot, connected != null, state.healthSyncInProgress, onRefreshHealth) }
@@ -295,11 +343,6 @@ private fun HomeScreen(
             )
         }
         item { NewcomerTipsCarousel() }
-        if (connected?.device?.oobeComplete == true) {
-            item {
-                SectionCard("Ready for everyday use", "Microband will reconnect through your saved Android companion association. Notification forwarding is opt-in.")
-            }
-        }
     }
 }
 
@@ -337,7 +380,6 @@ private fun HealthDashboard(
             CompactMetric("Distance", snapshot?.daily?.distanceCentimeters?.let { String.format(Locale.US, "%.2f km", it / 100_000.0) } ?: "—", Modifier.weight(1f))
             CompactMetric("Sleep", snapshot?.lastSleep?.let { durationText(it.timeAsleepMillis) } ?: "—", Modifier.weight(1f))
         }
-        Text("Open Health for trends and detailed records.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -367,7 +409,6 @@ private fun HealthScreen(state: MicrobandUiState, onRefresh: () -> Unit, modifie
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Text("Health", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-            Text("Band readings stay private on this phone", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -385,27 +426,11 @@ private fun HealthScreen(state: MicrobandUiState, onRefresh: () -> Unit, modifie
             }
             if (state.healthSyncInProgress) LinearProgressIndicator(Modifier.fillMaxWidth())
         }
-        state.healthSnapshot?.daily?.let { daily ->
-            item {
-                Card(shape = RoundedCornerShape(22.dp)) {
-                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(if (daily.cumulativeSinceReset) "Band counters" else "Today's totals", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                        if (daily.cumulativeSinceReset) Text("This firmware reports totals since its last counter reset, not daily values. These are excluded from trend charts.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        HealthValue("Steps", daily.steps?.let { String.format(Locale.US, "%,d", it) })
-                        HealthValue("Calories", daily.calories?.let { "$it cal" })
-                        HealthValue("Distance", daily.distanceCentimeters?.let { String.format(Locale.US, "%.2f km", it / 100_000.0) })
-                        HealthValue("Floors climbed", daily.flightsAscended?.toString())
-                        HealthValue("Elevation gain", daily.elevationGainCentimeters?.let { String.format(Locale.US, "%.0f m", it / 100.0) })
-                        HealthValue("UV exposure", daily.uvExposure?.toString())
-                    }
-                }
-            }
-        }
         item { ActivitySummaryCard("Latest run", state.healthSnapshot?.lastRun, showDistance = true) }
         item { ActivitySummaryCard("Latest exercise", state.healthSnapshot?.lastWorkout, showDistance = false) }
         item { SleepSummaryCard(state.healthSnapshot?.lastSleep) }
         if (history.isEmpty()) item {
-            SectionCard("No trend data yet", "Sync while the Band is connected. Microband saves one daily total locally, so weekly and monthly charts build over time.")
+            SectionCard("No trend data", "Connect the Band and sync.")
         }
     }
 }
@@ -437,7 +462,7 @@ private fun StepsChart(
             Text(String.format(Locale.US, "%,d total", total), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             val barColor = MaterialTheme.colorScheme.primary
             val emptyColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .12f)
-            val selectedColor = MaterialTheme.colorScheme.onSecondaryContainer
+            val selectedColor = MaterialTheme.colorScheme.tertiary
             Canvas(
                 Modifier.fillMaxWidth().height(150.dp).pointerInput(slots) {
                     detectTapGestures { offset ->
@@ -451,24 +476,26 @@ private fun StepsChart(
                 slots.forEachIndexed { index, date ->
                     val value = byDate[date.toString()]?.steps ?: 0
                     val height = if (value > 0) size.height * (value.toFloat() / maximum) else 3f
+                    val selected = date.toString() == selectedDate
+                    val widthFraction = if (selected) .78f else .64f
                     drawRoundRect(
-                        color = if (value > 0) barColor else emptyColor,
-                        topLeft = androidx.compose.ui.geometry.Offset(index * gap + gap * .18f, size.height - height),
-                        size = androidx.compose.ui.geometry.Size(gap * .64f, height),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(gap * .2f),
+                        color = if (value > 0) { if (selected) selectedColor else barColor } else emptyColor,
+                        topLeft = androidx.compose.ui.geometry.Offset(index * gap + gap * ((1f - widthFraction) / 2f), size.height - height),
+                        size = androidx.compose.ui.geometry.Size(gap * widthFraction, height),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(if (selected) gap * .34f else gap * .2f),
                     )
-                    if (date.toString() == selectedDate) {
-                        drawRoundRect(
-                            color = selectedColor,
-                            topLeft = androidx.compose.ui.geometry.Offset(index * gap + gap * .08f, 0f),
-                            size = androidx.compose.ui.geometry.Size(gap * .84f, size.height),
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(gap * .2f),
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f),
-                        )
-                    }
                 }
             }
-            Text("Tap a day to see every saved value.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .75f))
+            val selected = byDate[selectedDate]
+            val selectedLabel = runCatching { LocalDate.parse(selectedDate).format(DateTimeFormatter.ofPattern("MMM d")) }.getOrDefault(selectedDate)
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.tertiaryContainer) {
+                Text(
+                    "$selectedLabel  •  ${selected?.steps?.let { String.format(Locale.US, "%,d steps", it) } ?: "No data"}",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
         }
     }
 }
@@ -479,14 +506,20 @@ private fun DailyHealthCard(date: String, day: HealthDailyEntity?) {
         LocalDate.parse(date).format(DateTimeFormatter.ofPattern("EEEE, MMM d"))
     }.getOrDefault(date)
     Card(shape = RoundedCornerShape(22.dp)) {
-        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            HealthValue("Steps", day?.steps?.let { String.format(Locale.US, "%,d", it) })
-            HealthValue("Calories", day?.calories?.let { "$it cal" })
-            HealthValue("Distance", day?.distanceCentimeters?.let { String.format(Locale.US, "%.2f km", it / 100_000.0) })
-            HealthValue("Floors climbed", day?.flightsAscended?.toString())
-            HealthValue("Elevation gain", day?.elevationGainCentimeters?.let { String.format(Locale.US, "%.0f m", it / 100.0) })
-            HealthValue("UV exposure", day?.uvExposure?.toString())
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HealthMetric(Icons.Rounded.DirectionsWalk, "Steps", day?.steps?.let { String.format(Locale.US, "%,d", it) }, Modifier.weight(1f))
+                HealthMetric(Icons.Rounded.LocalFireDepartment, "Calories", day?.calories?.let { "$it cal" }, Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HealthMetric(Icons.Rounded.Straighten, "Distance", day?.distanceCentimeters?.let { String.format(Locale.US, "%.2f km", it / 100_000.0) }, Modifier.weight(1f))
+                HealthMetric(Icons.Rounded.Stairs, "Floors", day?.flightsAscended?.toString(), Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HealthMetric(Icons.Rounded.Terrain, "Elevation", day?.elevationGainCentimeters?.let { String.format(Locale.US, "%.0f m", it / 100.0) }, Modifier.weight(1f))
+                HealthMetric(Icons.Rounded.WbSunny, "UV", day?.uvExposure?.toString(), Modifier.weight(1f))
+            }
             Text(
                 day?.let { "Last synced ${healthDate(java.time.Instant.ofEpochMilli(it.syncedAt))}" } ?: "No saved reading for this day",
                 style = MaterialTheme.typography.bodySmall,
@@ -497,21 +530,36 @@ private fun DailyHealthCard(date: String, day: HealthDailyEntity?) {
 }
 
 @Composable
+private fun HealthMetric(icon: ImageVector, label: String, value: String?, modifier: Modifier = Modifier) {
+    Column(
+        modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainer).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+        Text(value ?: "—", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
 private fun ActivitySummaryCard(title: String, summary: BandActivitySummary?, showDistance: Boolean) {
     Card(shape = RoundedCornerShape(22.dp)) {
-        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(if (showDistance) Icons.Rounded.DirectionsRun else Icons.Rounded.FitnessCenter, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            }
             Text(summary?.endedAt?.let(::healthDate) ?: "No saved record found", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (summary != null) {
-                val metrics = buildList {
-                    add(durationText(summary.durationMillis))
-                    if (showDistance) summary.distanceCentimeters?.let {
-                        add(String.format(Locale.US, "%.2f mi", it / 160_934.4))
-                    }
-                    add("${summary.calories} cal")
-                    if (summary.averageHeartRate > 0) add("${summary.averageHeartRate} avg bpm")
+                Text(durationText(summary.durationMillis), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (showDistance) HealthMetric(Icons.Rounded.Straighten, "Distance", summary.distanceCentimeters?.let { String.format(Locale.US, "%.2f mi", it / 160_934.4) }, Modifier.weight(1f))
+                    HealthMetric(Icons.Rounded.LocalFireDepartment, "Calories", "${summary.calories} cal", Modifier.weight(1f))
                 }
-                Text(metrics.joinToString("  •  "), style = MaterialTheme.typography.bodyLarge)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    HealthMetric(Icons.Rounded.MonitorHeart, "Average HR", summary.averageHeartRate.takeIf { it > 0 }?.let { "$it bpm" }, Modifier.weight(1f))
+                    HealthMetric(Icons.Rounded.Speed, "Maximum HR", summary.maximumHeartRate.takeIf { it > 0 }?.let { "$it bpm" }, Modifier.weight(1f))
+                }
             }
         }
     }
@@ -520,16 +568,33 @@ private fun ActivitySummaryCard(title: String, summary: BandActivitySummary?, sh
 @Composable
 private fun SleepSummaryCard(summary: BandSleepSummary?) {
     Card(shape = RoundedCornerShape(22.dp)) {
-        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("Latest sleep", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(Icons.Rounded.Bedtime, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text("Latest sleep", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            }
             Text(summary?.endedAt?.let(::healthDate) ?: "No saved sleep found", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (summary != null) {
-                val metrics = buildList {
-                    add("${durationText(summary.timeAsleepMillis)} asleep")
-                    add("${summary.timesWokeUp} wake-ups")
-                    if (summary.restingHeartRate > 0) add("${summary.restingHeartRate} resting bpm")
+                val efficiency = if (summary.durationMillis > 0) {
+                    (summary.timeAsleepMillis * 100.0 / summary.durationMillis).coerceIn(0.0, 100.0).toInt()
+                } else 0
+                Text("$efficiency%", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text("Sleep efficiency", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                LinearProgressIndicator(progress = { efficiency / 100f }, modifier = Modifier.fillMaxWidth())
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    HealthMetric(Icons.Rounded.Bedtime, "Time asleep", durationText(summary.timeAsleepMillis), Modifier.weight(1f))
+                    HealthMetric(Icons.Rounded.Schedule, "Time in bed", durationText(summary.durationMillis), Modifier.weight(1f))
                 }
-                Text(metrics.joinToString("  •  "), style = MaterialTheme.typography.bodyLarge)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    HealthMetric(Icons.Rounded.Schedule, "Fell asleep in", durationText(summary.timeToFallAsleepMillis), Modifier.weight(1f))
+                    HealthMetric(Icons.Rounded.Bedtime, "Wake-ups", summary.timesWokeUp.toString(), Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    HealthMetric(Icons.Rounded.MonitorHeart, "Resting HR", summary.restingHeartRate.takeIf { it > 0 }?.let { "$it bpm" }, Modifier.weight(1f))
+                    HealthMetric(Icons.Rounded.LocalFireDepartment, "Calories", "${summary.calories} cal", Modifier.weight(1f))
+                }
+                HealthValue("Deep sleep", null)
+                Text("Sleep stages are not included in the Band summary currently available to Microband.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -647,84 +712,95 @@ private fun StatusRow(done: Boolean, label: String) {
 }
 
 @Composable
-private fun NotificationsScreen(
+private fun NotificationSettingsSection(
     accessGranted: Boolean,
     batteryOptimizationIgnored: Boolean,
-    enabledCategories: Set<String>,
+    apps: List<NotificationAppInfo>,
+    allEnabled: Boolean,
+    disabledPackages: Set<String>,
     connected: Boolean,
     onOpenNotificationAccess: () -> Unit,
-    onSetCategory: (String, Boolean) -> Unit,
+    onSetPackage: (String, Boolean) -> Unit,
+    onSetAll: (Boolean) -> Unit,
     onSendTestNotification: () -> Unit,
     onOpenBatteryOptimization: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
-            Text("Notifications", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-            Text("Choose what can appear on your Band.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Card(shape = RoundedCornerShape(20.dp)) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(Icons.Rounded.NotificationsActive, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Text("Notification forwarding", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                }
+                StatusRow(accessGranted, if (accessGranted) "Access enabled" else "Access required")
+                StatusRow(batteryOptimizationIgnored, if (batteryOptimizationIgnored) "Background access enabled" else "Background access restricted")
+                if (!accessGranted) Button(onClick = onOpenNotificationAccess, modifier = Modifier.fillMaxWidth()) { Text("Enable access") }
+                else FilledTonalButton(onClick = onOpenNotificationAccess, modifier = Modifier.fillMaxWidth()) { Text("Manage access") }
+                if (!batteryOptimizationIgnored) FilledTonalButton(onClick = onOpenBatteryOptimization, modifier = Modifier.fillMaxWidth()) { Text("Allow background use") }
+            }
         }
-        item {
-            SectionCard("Private by default", "Notification access is optional. Persistent system notifications and duplicate updates are never forwarded.")
-        }
-        item {
-            Card(shape = RoundedCornerShape(18.dp)) {
-                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Background forwarding", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "Microband's screen does not need to stay open. Android runs its notification listener in the background, but some phones restrict it to save power.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    StatusRow(batteryOptimizationIgnored, if (batteryOptimizationIgnored) "Battery optimization disabled" else "Battery optimization may interrupt forwarding")
-                    if (!batteryOptimizationIgnored) {
-                        Button(onClick = onOpenBatteryOptimization, modifier = Modifier.fillMaxWidth()) {
-                            Text("Allow background operation")
-                        }
+        Card(shape = RoundedCornerShape(20.dp)) {
+            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                Text("Apps", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp))
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = { onSetAll(true) }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Rounded.NotificationsActive, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("All on")
                     }
-                    Text(
-                        "If your phone has an App battery usage or Auto-start page, set Microband to Unrestricted and allow background activity there too.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    FilledTonalButton(onClick = { onSetAll(false) }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Rounded.NotificationsOff, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("All off")
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                apps.take(if (expanded) apps.size else 5).forEachIndexed { index, app ->
+                    if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 18.dp))
+                    ListItem(
+                        leadingContent = { NotificationAppIcon(app) },
+                        headlineContent = { Text(app.label) },
+                        supportingContent = {
+                            Text(if (app.notificationCount > 0) "${app.notificationCount} recent" else "Installed")
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = allEnabled && app.packageName !in disabledPackages,
+                                onCheckedChange = { onSetPackage(app.packageName, it) },
+                            )
+                        },
                     )
                 }
-            }
-        }
-        item {
-            Card(shape = RoundedCornerShape(18.dp)) {
-                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusRow(accessGranted, if (accessGranted) "Notification access enabled" else "Notification access required")
-                    Text(
-                        if (accessGranted) "Microband can read the notifications you choose below."
-                        else "Enable Microband in Android's notification-access settings.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                if (apps.size > 5) {
+                    HorizontalDivider(Modifier.padding(horizontal = 18.dp))
+                    TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (expanded) "Show fewer" else "Show ${apps.size - 5} more")
+                    }
                 }
+                if (apps.isEmpty()) Text("No notification apps found", modifier = Modifier.padding(18.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        items(NotificationCategory.entries) { category ->
-            Card(shape = RoundedCornerShape(18.dp)) {
-                ListItem(
-                    headlineContent = { Text(category.label) },
-                    trailingContent = {
-                        Switch(
-                            checked = category.preferenceKey in enabledCategories,
-                            onCheckedChange = { onSetCategory(category.preferenceKey, it) },
-                        )
-                    },
-                )
-            }
+        Button(onClick = onSendTestNotification, enabled = connected, modifier = Modifier.fillMaxWidth()) {
+            Text(if (connected) "Send test notification" else "Connect Band to test")
         }
-        item {
-            if (accessGranted) {
-                FilledTonalButton(onClick = onOpenNotificationAccess, modifier = Modifier.fillMaxWidth()) { Text("Manage notification access") }
-            } else {
-                Button(onClick = onOpenNotificationAccess, modifier = Modifier.fillMaxWidth()) { Text("Open notification access") }
-            }
-        }
-        item {
-            Button(onClick = onSendTestNotification, enabled = connected, modifier = Modifier.fillMaxWidth()) {
-                Text(if (connected) "Send test notification" else "Connect Band to send a test")
-            }
-        }
+    }
+}
+
+@Composable
+private fun NotificationAppIcon(app: NotificationAppInfo) {
+    val context = LocalContext.current
+    val bitmap = remember(app.packageName) {
+        runCatching {
+            context.packageManager.getApplicationIcon(app.packageName).toBitmap(48, 48).asImageBitmap()
+        }.getOrNull()
+    }
+    if (bitmap != null) {
+        Image(bitmap, contentDescription = null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)))
+    } else {
+        Icon(Icons.Rounded.NotificationsActive, contentDescription = null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
     }
 }
 
@@ -823,12 +899,6 @@ private fun PersonalizeScreen(
             }
         }
         item {
-            SectionCard(
-                "Display wake behavior",
-                "Band 2 does not provide a double-tap-to-wake mode. For its supported clock modes, open Settings on the Band, then Watch Mode, and choose Off, Rotate On, or Always On. Always On uses noticeably more battery.",
-            )
-        }
-        item {
             Card(shape = RoundedCornerShape(24.dp)) {
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Wallpaper", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
@@ -883,8 +953,11 @@ private fun TileManagerCard(
             )
             installed.forEachIndexed { index, tile ->
                 val protected = tile.name.equals("Me", true) || tile.name.equals("Settings", true)
+                val label = tileLabel(tile.name)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(tile.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(tileIcon(tile.name), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     IconButton(
                         onClick = {
                             val changed = installed.toMutableList()
@@ -892,7 +965,7 @@ private fun TileManagerCard(
                             onInstalledChange(changed)
                         },
                         enabled = index > 0,
-                    ) { Icon(Icons.Rounded.ArrowUpward, "Move ${tile.name} up") }
+                    ) { Icon(Icons.Rounded.ArrowUpward, "Move $label up") }
                     IconButton(
                         onClick = {
                             val changed = installed.toMutableList()
@@ -900,23 +973,26 @@ private fun TileManagerCard(
                             onInstalledChange(changed)
                         },
                         enabled = index < installed.lastIndex,
-                    ) { Icon(Icons.Rounded.ArrowDownward, "Move ${tile.name} down") }
+                    ) { Icon(Icons.Rounded.ArrowDownward, "Move $label down") }
                     IconButton(
                         onClick = { onInstalledChange(installed.filterNot { it.id == tile.id }) },
                         enabled = !protected && installed.size > 1,
-                    ) { Icon(Icons.Rounded.Remove, "Remove ${tile.name}") }
+                    ) { Icon(Icons.Rounded.Remove, "Remove $label") }
                 }
             }
             if (available.isNotEmpty()) {
                 HorizontalDivider()
                 Text("Available tiles", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 available.filter { candidate -> installed.none { it.id == candidate.id } }.forEach { tile ->
+                    val label = tileLabel(tile.name)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(tile.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Icon(tileIcon(tile.name), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text(label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         IconButton(
                             onClick = { onInstalledChange(installed + tile) },
                             enabled = capacity > 0 && installed.size < capacity,
-                        ) { Icon(Icons.Rounded.Add, "Add ${tile.name}") }
+                        ) { Icon(Icons.Rounded.Add, "Add $label") }
                     }
                 }
             }
@@ -928,9 +1004,41 @@ private fun TileManagerCard(
                     modifier = Modifier.weight(1f),
                 ) { Text("Apply tiles") }
             }
-            Text("Me and Settings stay enabled so the Band remains usable.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+private fun tileLabel(name: String): String = when (name.lowercase()) {
+    "sms" -> "Messages"
+    "guidedworkout" -> "Guided workout"
+    "hike" -> "Explore"
+    else -> name
+}
+
+private fun tileIcon(name: String): ImageVector = when {
+    name.equals("Me", true) -> Icons.Rounded.AccountCircle
+    "step" in name.lowercase() -> Icons.Rounded.DirectionsWalk
+    "bike" in name.lowercase() -> Icons.Rounded.DirectionsBike
+    "run" in name.lowercase() -> Icons.Rounded.DirectionsRun
+    "exercise" in name.lowercase() || "workout" in name.lowercase() -> Icons.Rounded.FitnessCenter
+    "sleep" in name.lowercase() -> Icons.Rounded.Bedtime
+    "heart" in name.lowercase() -> Icons.Rounded.MonitorHeart
+    "uv" in name.lowercase() -> Icons.Rounded.WbSunny
+    "alarm" in name.lowercase() -> Icons.Rounded.Alarm
+    "timer" in name.lowercase() || "stopwatch" in name.lowercase() -> Icons.Rounded.Timer
+    "call" in name.lowercase() -> Icons.Rounded.Call
+    "message" in name.lowercase() || "text" in name.lowercase() || name.equals("SMS", true) -> Icons.Rounded.Mail
+    "mail" in name.lowercase() || "email" in name.lowercase() -> Icons.Rounded.Email
+    "calendar" in name.lowercase() -> Icons.Rounded.CalendarMonth
+    "weather" in name.lowercase() -> Icons.Rounded.Cloud
+    "finance" in name.lowercase() || "stock" in name.lowercase() -> Icons.Rounded.ShowChart
+    "starbucks" in name.lowercase() -> Icons.Rounded.LocalCafe
+    "cortana" in name.lowercase() -> Icons.Rounded.Mic
+    "explore" in name.lowercase() || "hike" in name.lowercase() -> Icons.Rounded.Explore
+    "golf" in name.lowercase() -> Icons.Rounded.GolfCourse
+    "map" in name.lowercase() -> Icons.Rounded.Place
+    "setting" in name.lowercase() -> Icons.Rounded.Settings
+    else -> Icons.Rounded.Favorite
 }
 
 @Composable
@@ -981,13 +1089,22 @@ private fun SettingsContainer(
     onInspect: () -> Unit,
     onClearLog: () -> Unit,
     onRefresh: () -> Unit,
+    onOpenNotificationAccess: () -> Unit,
+    onSetNotificationPackage: (String, Boolean) -> Unit,
+    onSetAllNotifications: (Boolean) -> Unit,
+    onSendTestNotification: () -> Unit,
+    onOpenBatteryOptimization: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var developerOpen by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     if (developerOpen) {
         DebugScreen(state, onConnect, onDisconnect, onInspect, onClearLog, onRefresh, { developerOpen = false }, modifier)
     } else {
-        SettingsScreen(state, onSetProtocolLogging, onOpenFirmwareArchive, onChooseFirmwarePackage, onStartFirmwareUpdate, { developerOpen = true }, modifier)
+        SettingsScreen(
+            state, onSetProtocolLogging, onOpenFirmwareArchive, onChooseFirmwarePackage, onStartFirmwareUpdate,
+            onOpenNotificationAccess, onSetNotificationPackage, onSetAllNotifications, onSendTestNotification, onOpenBatteryOptimization,
+            { developerOpen = true }, modifier,
+        )
     }
 }
 
@@ -998,12 +1115,31 @@ private fun SettingsScreen(
     onOpenFirmwareArchive: () -> Unit,
     onChooseFirmwarePackage: () -> Unit,
     onStartFirmwareUpdate: () -> Unit,
+    onOpenNotificationAccess: () -> Unit,
+    onSetNotificationPackage: (String, Boolean) -> Unit,
+    onSetAllNotifications: (Boolean) -> Unit,
+    onSendTestNotification: () -> Unit,
+    onOpenBatteryOptimization: () -> Unit,
     onOpenDeveloper: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Text("Settings", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold) }
-        item { SectionCard("Local-first", "No analytics, Microsoft account, custom backend, or cloud upload. Health data remains on this device.") }
+        item {
+            NotificationSettingsSection(
+                state.notificationAccessGranted,
+                state.batteryOptimizationIgnored,
+                state.notificationApps,
+                state.allNotificationsEnabled,
+                state.disabledNotificationPackages,
+                state.connection is BandConnectionState.Connected,
+                onOpenNotificationAccess,
+                onSetNotificationPackage,
+                onSetAllNotifications,
+                onSendTestNotification,
+                onOpenBatteryOptimization,
+            )
+        }
         item {
             Card(shape = RoundedCornerShape(20.dp)) {
                 ListItem(
@@ -1013,7 +1149,6 @@ private fun SettingsScreen(
                 )
             }
         }
-        item { SectionCard("Health Connect", "Optional export will become available after reliable Band history sync is implemented.") }
         item {
             FirmwareCard(
                 (state.connection as? BandConnectionState.Connected)?.device,
@@ -1029,18 +1164,18 @@ private fun SettingsScreen(
                 Text("Open Developer tools")
             }
         }
-        item { Text("Microband 0.5.0", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Microband 0.7.0", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
 private data class NewcomerTip(val title: String, val body: String)
 
 private val newcomerTips = listOf(
-    NewcomerTip("Wear it snugly", "Keep the sensor flat against your skin, a little above the wrist bone. Snug is good; painfully tight is not."),
-    NewcomerTip("Choose your screen side", "Band 2 works with the display inside or outside your wrist. Inside is often easier to glance at and protects the screen."),
-    NewcomerTip("Keep the contacts dry", "Dry the Band and charging contacts before charging. Clean contacts gently and avoid leaving the battery completely empty."),
-    NewcomerTip("Fix the clock anytime", "After travel or a timezone change, connect Microband and tap Sync time. The app verifies both UTC and displayed local time."),
-    NewcomerTip("One companion at a time", "If connection becomes unreliable, close other Band tools and keep the phone nearby before reconnecting."),
+    NewcomerTip("Wear it snugly", "Place the sensor flat against your skin, just above the wrist bone."),
+    NewcomerTip("Choose your screen side", "Wear the display inside or outside your wrist. Change orientation in Band Settings."),
+    NewcomerTip("Keep contacts dry", "Dry the Band and charging contacts before charging."),
+    NewcomerTip("Sync after travel", "Connect Microband and tap Sync time after a timezone change."),
+    NewcomerTip("Connection trouble", "Close other Band tools, keep the phone nearby, then reconnect."),
 )
 
 @Composable
@@ -1058,11 +1193,10 @@ private fun NewcomerTipsCarousel() {
             Card(
                 shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-                modifier = Modifier.fillMaxWidth().height(176.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(
-                    Modifier.fillMaxSize().padding(22.dp),
-                    verticalArrangement = Arrangement.Center,
+                    Modifier.fillMaxWidth().padding(22.dp),
                 ) {
                     Text("Tip ${page + 1} of ${newcomerTips.size}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .7f))
                     Spacer(Modifier.height(8.dp))

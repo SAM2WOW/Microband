@@ -62,4 +62,20 @@ class BandHealthCodecTest {
         assertEquals(250L, workout.calories)
         assertEquals(132L, workout.averageHeartRate)
     }
+
+    @Test
+    fun derivesSleepStartFromEndAndDuration() {
+        // Captured from Band 2 firmware 2.0.5202.0. The first FILETIME is a
+        // record timestamp and can be later than EndTime; it is not StartTime.
+        val bytes = "1C7E45C0BC43DD0107008D2ACC0108000000B0A37800DC8653018C020000430000005200000010529495B543DD0171890F0002000000"
+            .chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+        val sleep = BandHealthCodec.sleep(bytes)
+
+        assertEquals(30_157_453L, sleep.durationMillis)
+        assertEquals(22_251_228L, sleep.timeAsleepMillis)
+        assertEquals(8L, sleep.timesWokeUp)
+        assertEquals(67L, sleep.restingHeartRate)
+        assertEquals(sleep.endedAt?.minusMillis(sleep.durationMillis), sleep.startedAt)
+    }
 }

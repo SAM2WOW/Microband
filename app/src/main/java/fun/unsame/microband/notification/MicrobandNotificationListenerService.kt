@@ -12,7 +12,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -23,6 +22,20 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
     private val recentFingerprints = LinkedHashMap<Int, Long>()
     private val recentSends = ArrayDeque<Long>()
     private val activeCalls = ConcurrentHashMap<String, BandPhoneNotification>()
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        scope.launch {
+            val preferences = (application as MicrobandApplication).preferences
+            activeNotifications.orEmpty()
+                .asSequence()
+                .filter { it.packageName != packageName }
+                .filter { it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
+                .map { it.packageName }
+                .distinct()
+                .forEach { preferences.recordNotificationApp(it) }
+        }
+    }
 
     override fun onNotificationPosted(notification: StatusBarNotification?) {
         val posted = notification ?: return
@@ -43,8 +56,8 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
 
         scope.launch {
             val app = application as MicrobandApplication
-            val enabled = app.preferences.notificationCategories.first()
-            if (category.preferenceKey !in enabled) return@launch
+            app.preferences.recordNotificationApp(normalized.sourcePackage)
+            if (!app.preferences.isNotificationPackageEnabled(normalized.sourcePackage)) return@launch
             if (!shouldSend(normalized, kind)) return@launch
 
             val keyguard = getSystemService(KeyguardManager::class.java)
@@ -61,8 +74,7 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
         val call = activeCalls.remove(posted.key) ?: return
         scope.launch {
             val app = application as MicrobandApplication
-            val enabled = app.preferences.notificationCategories.first()
-            if (NotificationCategory.CALLS.preferenceKey !in enabled) return@launch
+            if (!app.preferences.isNotificationPackageEnabled(call.sourcePackage)) return@launch
             val association = runCatching { app.associationManager.currentAssociation() }.getOrNull() ?: return@launch
             app.connectionManager.forwardNotification(
                 call.copy(timestamp = Instant.now()),

@@ -131,13 +131,43 @@ class BandProtocol(private val transport: BandTransport) {
         return BandTileCatalog(installed, defaults.filter { candidate -> installed.none { it.id == candidate.id } }, capacity)
     }
 
-    suspend fun setTiles(tiles: List<BandTileInfo>) = withFirmwareUiSync {
-        val payload = BandTileCodec.encode(tiles)
+    suspend fun setTiles(tiles: List<BandTileInfo>) {
+        require(tiles.isNotEmpty()) { "At least one Band tile is required" }
+        require(tiles.distinctBy { it.id }.size == tiles.size) { "Band tiles must be unique" }
+        val catalog = getTileCatalog()
+        require(tiles.size <= catalog.capacity) { "The Band supports ${catalog.capacity} tiles" }
+        val installedIds = catalog.installed.mapTo(mutableSetOf()) { it.id }
+        val defaultIds = (catalog.installed + catalog.available).mapTo(mutableSetOf()) { it.id }
+        require(tiles.all { it.id in defaultIds }) { "Only built-in Band tiles can be added" }
+
+        withFirmwareUiSync {
+            for (current in catalog.installed.filter { candidate -> tiles.none { it.id == candidate.id } }) {
+                unregisterTile(current)
+            }
+            for (tile in tiles.filter { it.id !in installedIds }) {
+                registerDefaultTile(tile)
+            }
+            val payload = BandTileCodec.encode(tiles)
+            write(
+                BandConstants.FACILITY_INSTALLED_APP_LIST,
+                1,
+                transfer = payload,
+                arguments = BandPacketCodec.littleEndianInt(tiles.size),
+                timeoutMillis = 60_000,
+            )
+        }
+    }
+
+    private suspend fun registerDefaultTile(tile: BandTileInfo) {
+        val payload = tile.wireData.copyOfRange(0, 16) + BandPacketCodec.littleEndianInt(0)
+        write(BandConstants.FACILITY_FIREBALL_APPS, 0, payload, timeoutMillis = 60_000)
+    }
+
+    private suspend fun unregisterTile(tile: BandTileInfo) {
         write(
-            BandConstants.FACILITY_INSTALLED_APP_LIST,
+            BandConstants.FACILITY_FIREBALL_APPS,
             1,
-            transfer = payload,
-            arguments = BandPacketCodec.littleEndianInt(tiles.size),
+            tile.wireData.copyOfRange(0, 16),
             timeoutMillis = 60_000,
         )
     }

@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) { viewModel.refresh() }
                 LaunchedEffect(Unit) { viewModel.refreshNotificationAccess(context) }
                 LaunchedEffect(Unit) { viewModel.refreshBackgroundStatus(context) }
+                LaunchedEffect(Unit) { viewModel.refreshNotificationApps(context) }
 
                 MicrobandApp(
                     state = state,
@@ -73,7 +74,8 @@ class MainActivity : ComponentActivity() {
                     onSetProtocolLogging = viewModel::setProtocolLogging,
                     onRefresh = viewModel::refresh,
                     onOpenNotificationAccess = { viewModel.openNotificationAccess(context) },
-                    onSetNotificationCategory = viewModel::setNotificationCategory,
+                    onSetNotificationPackage = viewModel::setNotificationPackage,
+                    onSetAllNotifications = viewModel::setAllNotifications,
                     onSendTestNotification = viewModel::sendTestNotification,
                     onOpenBatteryOptimization = { viewModel.openBatteryOptimizationSettings(context) },
                     onRefreshHealth = viewModel::refreshHealthData,
@@ -95,5 +97,6 @@ class MainActivity : ComponentActivity() {
         viewModel.refresh()
         viewModel.refreshNotificationAccess(this)
         viewModel.refreshBackgroundStatus(this)
+        viewModel.refreshNotificationApps(this)
     }
 }

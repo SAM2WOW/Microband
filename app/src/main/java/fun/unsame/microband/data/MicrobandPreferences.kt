@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private val Context.dataStore by preferencesDataStore("microband")
@@ -22,8 +23,10 @@ class MicrobandPreferences(private val context: Context) {
 
     val associationId: Flow<Int?> = context.dataStore.data.map { it[ASSOCIATION_ID] }
     val protocolLogging: Flow<Boolean> = context.dataStore.data.map { it[PROTOCOL_LOGGING] ?: false }
-    val notificationCategories: Flow<Set<String>> = context.dataStore.data.map {
-        it[NOTIFICATION_CATEGORIES] ?: DEFAULT_NOTIFICATION_CATEGORIES
+    val allNotificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALL_NOTIFICATIONS_ENABLED] ?: true }
+    val disabledNotificationPackages: Flow<Set<String>> = context.dataStore.data.map { it[DISABLED_NOTIFICATION_PACKAGES] ?: emptySet() }
+    val notificationActivity: Flow<Map<String, NotificationAppActivity>> = context.dataStore.data.map {
+        decodeNotificationActivity(it[NOTIFICATION_ACTIVITY].orEmpty())
     }
     val themeAccent: Flow<Int> = context.dataStore.data.map { it[THEME_ACCENT] ?: DEFAULT_THEME_ACCENT }
     val oobeStep: Flow<BandOobeStep> = context.dataStore.data.map { preferences ->
@@ -43,11 +46,44 @@ class MicrobandPreferences(private val context: Context) {
         context.dataStore.edit { it[PROTOCOL_LOGGING] = enabled }
     }
 
-    suspend fun setNotificationCategory(category: String, enabled: Boolean) {
+    suspend fun setAllNotificationsEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
-            val categories = (preferences[NOTIFICATION_CATEGORIES] ?: DEFAULT_NOTIFICATION_CATEGORIES).toMutableSet()
-            if (enabled) categories += category else categories -= category
-            preferences[NOTIFICATION_CATEGORIES] = categories
+            preferences[ALL_NOTIFICATIONS_ENABLED] = enabled
+            if (enabled) preferences[DISABLED_NOTIFICATION_PACKAGES] = emptySet()
+        }
+    }
+
+    suspend fun setNotificationPackageEnabled(packageName: String, enabled: Boolean, knownPackages: Set<String>) {
+        context.dataStore.edit { preferences ->
+            val disabled = (preferences[DISABLED_NOTIFICATION_PACKAGES] ?: emptySet()).toMutableSet()
+            if (enabled) {
+                if (preferences[ALL_NOTIFICATIONS_ENABLED] == false) {
+                    preferences[ALL_NOTIFICATIONS_ENABLED] = true
+                    disabled += knownPackages
+                }
+                disabled -= packageName
+            } else {
+                disabled += packageName
+            }
+            preferences[DISABLED_NOTIFICATION_PACKAGES] = disabled
+        }
+    }
+
+    suspend fun isNotificationPackageEnabled(packageName: String): Boolean {
+        val preferences = context.dataStore.data.first()
+        return (preferences[ALL_NOTIFICATIONS_ENABLED] ?: true) &&
+            packageName !in (preferences[DISABLED_NOTIFICATION_PACKAGES] ?: emptySet())
+    }
+
+    suspend fun recordNotificationApp(packageName: String) {
+        context.dataStore.edit { preferences ->
+            val activity = decodeNotificationActivity(preferences[NOTIFICATION_ACTIVITY].orEmpty()).toMutableMap()
+            val previous = activity[packageName]
+            activity[packageName] = NotificationAppActivity((previous?.count ?: 0) + 1, System.currentTimeMillis())
+            preferences[NOTIFICATION_ACTIVITY] = activity.entries
+                .sortedByDescending { it.value.lastSeenMillis }
+                .take(200)
+                .mapTo(mutableSetOf()) { (name, value) -> "$name\t${value.count}\t${value.lastSeenMillis}" }
         }
     }
 
@@ -63,9 +99,22 @@ class MicrobandPreferences(private val context: Context) {
         private val ASSOCIATION_ID = intPreferencesKey("association_id")
         private val PROTOCOL_LOGGING = booleanPreferencesKey("protocol_logging")
         private val OOBE_STEP = stringPreferencesKey("oobe_step")
-        private val NOTIFICATION_CATEGORIES = stringSetPreferencesKey("notification_categories")
+        private val ALL_NOTIFICATIONS_ENABLED = booleanPreferencesKey("all_notifications_enabled")
+        private val DISABLED_NOTIFICATION_PACKAGES = stringSetPreferencesKey("disabled_notification_packages")
+        private val NOTIFICATION_ACTIVITY = stringSetPreferencesKey("notification_activity")
         private val THEME_ACCENT = intPreferencesKey("theme_accent")
-        private val DEFAULT_NOTIFICATION_CATEGORIES = setOf("calls", "messages", "discord", "calendar")
         private const val DEFAULT_THEME_ACCENT = 0xFF0078D7.toInt()
+
+        private fun decodeNotificationActivity(values: Set<String>): Map<String, NotificationAppActivity> =
+            values.mapNotNull { value ->
+                val parts = value.split('\t')
+                if (parts.size != 3) null else {
+                    val count = parts[1].toIntOrNull()
+                    val lastSeen = parts[2].toLongOrNull()
+                    if (count == null || lastSeen == null) null else parts[0] to NotificationAppActivity(count, lastSeen)
+                }
+            }.toMap()
     }
 }
+
+data class NotificationAppActivity(val count: Int, val lastSeenMillis: Long)

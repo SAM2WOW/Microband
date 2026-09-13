@@ -2,8 +2,10 @@ package com.unsame.microband.ui
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.LauncherApps
 import android.net.Uri
 import android.os.PowerManager
+import android.os.Process
 import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -24,7 +26,9 @@ import com.unsame.microband.bluetooth.BluetoothPermissionState
 import com.unsame.microband.data.MicrobandPreferences
 import com.unsame.microband.data.ProtocolPacketLog
 import com.unsame.microband.data.HealthDailyEntity
+import com.unsame.microband.data.NotificationAppActivity
 import com.unsame.microband.firmware.FirmwareUpdateService
+import com.unsame.microband.notification.NotificationAppInfo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,7 +52,9 @@ data class MicrobandUiState(
     val setupInProgress: Boolean = false,
     val firmwarePackageStatus: String? = null,
     val notificationAccessGranted: Boolean = false,
-    val notificationCategories: Set<String> = emptySet(),
+    val notificationApps: List<NotificationAppInfo> = emptyList(),
+    val allNotificationsEnabled: Boolean = true,
+    val disabledNotificationPackages: Set<String> = emptySet(),
     val batteryOptimizationIgnored: Boolean = false,
     val healthSnapshot: BandHealthSnapshot? = null,
     val healthSyncInProgress: Boolean = false,
@@ -66,6 +72,8 @@ class MicrobandViewModel(
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(MicrobandUiState())
     val state: StateFlow<MicrobandUiState> = mutableState.asStateFlow()
+    private var notificationAppLabels: Map<String, String> = emptyMap()
+    private var notificationActivity: Map<String, NotificationAppActivity> = emptyMap()
 
     init {
         viewModelScope.launch { connectionManager.state.collect { value -> mutableState.update { it.copy(connection = value) } } }
@@ -78,7 +86,9 @@ class MicrobandViewModel(
         viewModelScope.launch { connectionManager.firmwareUpdate.collect { value -> mutableState.update { it.copy(firmwareUpdate = value) } } }
         viewModelScope.launch { connectionManager.tiles.collect { value -> mutableState.update { it.copy(tiles = value) } } }
         viewModelScope.launch { preferences.protocolLogging.collect { value -> mutableState.update { it.copy(protocolLogging = value) } } }
-        viewModelScope.launch { preferences.notificationCategories.collect { value -> mutableState.update { it.copy(notificationCategories = value) } } }
+        viewModelScope.launch { preferences.allNotificationsEnabled.collect { value -> mutableState.update { it.copy(allNotificationsEnabled = value) } } }
+        viewModelScope.launch { preferences.disabledNotificationPackages.collect { value -> mutableState.update { it.copy(disabledNotificationPackages = value) } } }
+        viewModelScope.launch { preferences.notificationActivity.collect { value -> notificationActivity = value; rebuildNotificationApps() } }
         viewModelScope.launch { preferences.themeAccent.collect { value -> mutableState.update { it.copy(themeAccent = value) } } }
         viewModelScope.launch { connectionManager.events.collect { value -> mutableState.update { it.copy(message = value) } } }
     }
@@ -204,9 +214,44 @@ class MicrobandViewModel(
         }
     }
 
-    fun setNotificationCategory(category: String, enabled: Boolean) = viewModelScope.launch {
-        preferences.setNotificationCategory(category, enabled)
+    fun refreshNotificationApps(context: Context) = viewModelScope.launch {
+        notificationAppLabels = withContext(Dispatchers.IO) {
+            val packageManager = context.packageManager
+            val launcherApps = context.getSystemService(LauncherApps::class.java)
+            val packages = launcherApps.getActivityList(null, Process.myUserHandle())
+                .mapTo(mutableSetOf()) { it.applicationInfo.packageName }
+                .apply { addAll(notificationActivity.keys) }
+                .apply { remove(context.packageName) }
+            packages.mapNotNull { packageName ->
+                runCatching {
+                    packageName to packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
+                }.getOrNull()
+            }.toMap()
+        }
+        rebuildNotificationApps()
     }
+
+    private fun rebuildNotificationApps() {
+        val apps = notificationAppLabels.map { (packageName, label) ->
+            val activity = notificationActivity[packageName]
+            NotificationAppInfo(packageName, label, activity?.count ?: 0, activity?.lastSeenMillis ?: 0)
+        }.sortedWith(
+            compareByDescending<NotificationAppInfo> { it.notificationCount }
+                .thenByDescending { it.lastNotificationAt }
+                .thenBy { it.label.lowercase() },
+        )
+        mutableState.update { it.copy(notificationApps = apps) }
+    }
+
+    fun setNotificationPackage(packageName: String, enabled: Boolean) = viewModelScope.launch {
+        preferences.setNotificationPackageEnabled(
+            packageName,
+            enabled,
+            mutableState.value.notificationApps.mapTo(mutableSetOf()) { it.packageName },
+        )
+    }
+
+    fun setAllNotifications(enabled: Boolean) = viewModelScope.launch { preferences.setAllNotificationsEnabled(enabled) }
 
     fun sendTestNotification() = connectionManager.sendTestNotification()
     fun refreshHealthData() = connectionManager.refreshHealthData()
