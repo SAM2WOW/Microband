@@ -2,8 +2,8 @@ name: Release APK
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -14,12 +14,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Read app version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          echo "version=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "apk_name=Microband.v$VERSION_NAME.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this version was already released
+        id: check
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-java@v4
+        if: steps.check.outputs.exists == 'false'
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Set up Android SDK
+        if: steps.check.outputs.exists == 'false'
         run: |
           set -euo pipefail
           SDK_ROOT="$RUNNER_TEMP/android-sdk"
@@ -35,11 +55,13 @@ jobs:
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
 
       - name: Decode release keystore
+        if: steps.check.outputs.exists == 'false'
         run: echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.MICROBAND_RELEASE_KEYSTORE_BASE64 }}
 
       - name: Build signed release APK
+        if: steps.check.outputs.exists == 'false'
         run: ./gradlew :app:assembleRelease --no-daemon
         env:
           MICROBAND_RELEASE_STORE_FILE: ${{ format('{0}/release.jks', runner.temp) }}
@@ -47,8 +69,18 @@ jobs:
           MICROBAND_RELEASE_KEY_ALIAS: ${{ secrets.MICROBAND_RELEASE_KEY_ALIAS }}
           MICROBAND_RELEASE_KEY_PASSWORD: ${{ secrets.MICROBAND_RELEASE_KEY_PASSWORD }}
 
-      - name: Publish GitHub release
+      - name: Rename APK for release
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/${{ steps.version.outputs.apk_name }}"
+
+      - name: Create tag and publish GitHub release
+        if: steps.check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/app-release.apk
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Microband ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          files: dist/${{ steps.version.outputs.apk_name }}
           generate_release_notes: true
