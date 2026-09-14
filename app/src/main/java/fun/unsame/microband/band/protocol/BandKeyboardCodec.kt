@@ -9,6 +9,8 @@ object BandKeyboardCodec {
     const val CANDIDATES_FOR_NEXT_WORD = 2
     const val CANDIDATES_FOR_WORD = 3
     const val END = 4
+    const val PRE_INIT = 5
+    const val TRY_RELEASE = 6
     const val PRE_INIT_V2 = 7
 
     fun eventType(payload: ByteArray): Int? = payload.firstOrNull()?.toInt()?.and(0xFF)

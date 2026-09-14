@@ -755,6 +755,8 @@ class BandConnectionManager(
         val type = BandKeyboardCodec.eventType(payload) ?: return
         Log.d("MicrobandPush", "Keyboard event subtype=$type")
         when (type) {
+            BandKeyboardCodec.PRE_INIT,
+            BandKeyboardCodec.PRE_INIT_V2,
             BandKeyboardCodec.INIT -> protocol.sendKeyboardCommand(BandKeyboardCodec.INIT)
             BandKeyboardCodec.CANDIDATES_FOR_WORD ->
                 protocol.sendKeyboardCommand(BandKeyboardCodec.CANDIDATES_FOR_WORD)
