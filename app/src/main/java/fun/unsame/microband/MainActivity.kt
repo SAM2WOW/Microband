@@ -87,6 +87,9 @@ class MainActivity : ComponentActivity() {
                     onStartFirmwareUpdate = { viewModel.startFirmwareUpdate(context) },
                     onOpenFirmwareArchive = { viewModel.openFirmwareArchive(context) },
                     onChooseFirmwarePackage = { firmwareLauncher.launch(arrayOf("*/*")) },
+                    onSetGeminiEnabled = viewModel::setGeminiAssistantEnabled,
+                    onSaveGeminiKey = viewModel::saveGeminiApiKey,
+                    onClearGeminiKey = viewModel::clearGeminiApiKey,
                 )
             }
         }

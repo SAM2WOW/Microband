@@ -29,6 +29,7 @@ class MicrobandPreferences(private val context: Context) {
         decodeNotificationActivity(it[NOTIFICATION_ACTIVITY].orEmpty())
     }
     val themeAccent: Flow<Int> = context.dataStore.data.map { it[THEME_ACCENT] ?: DEFAULT_THEME_ACCENT }
+    val geminiAssistantEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEMINI_ASSISTANT_ENABLED] ?: false }
     val oobeStep: Flow<BandOobeStep> = context.dataStore.data.map { preferences ->
         preferences[OOBE_STEP]?.let { runCatching { BandOobeStep.valueOf(it) }.getOrNull() }
             ?: BandOobeStep.Inspect
@@ -91,6 +92,10 @@ class MicrobandPreferences(private val context: Context) {
         context.dataStore.edit { it[THEME_ACCENT] = accent }
     }
 
+    suspend fun setGeminiAssistantEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[GEMINI_ASSISTANT_ENABLED] = enabled }
+    }
+
     suspend fun setOobeStep(step: BandOobeStep) {
         context.dataStore.edit { it[OOBE_STEP] = step.name }
     }
@@ -103,6 +108,7 @@ class MicrobandPreferences(private val context: Context) {
         private val DISABLED_NOTIFICATION_PACKAGES = stringSetPreferencesKey("disabled_notification_packages")
         private val NOTIFICATION_ACTIVITY = stringSetPreferencesKey("notification_activity")
         private val THEME_ACCENT = intPreferencesKey("theme_accent")
+        private val GEMINI_ASSISTANT_ENABLED = booleanPreferencesKey("gemini_assistant_enabled")
         private const val DEFAULT_THEME_ACCENT = 0xFF0078D7.toInt()
 
         private fun decodeNotificationActivity(values: Set<String>): Map<String, NotificationAppActivity> =

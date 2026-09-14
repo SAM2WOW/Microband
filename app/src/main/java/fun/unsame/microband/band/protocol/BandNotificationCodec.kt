@@ -47,7 +47,7 @@ object BandNotificationCodec {
     }
 
     /** Creates a native Messages-tile entry using the Band 2 Envoy protobuf schema. */
-    fun sms(sender: String, body: String, timestamp: Instant, callId: Int = 0): ByteArray {
+    fun sms(sender: String, body: String, timestamp: Instant, callId: Int = 0, replyAvailable: Boolean = true): ByteArray {
         val output = ByteArrayOutputStream()
         output.writeMessageField(0x0A, fileTime(timestamp))
         output.writeMessageField(0x12, guid(SMS_TILE_ID))
@@ -55,10 +55,17 @@ object BandNotificationCodec {
         output.writeUtf8Field(0x2A, sender, 40)
         output.writeUtf8Field(0x32, body, 320)
         output.writeVarIntField(0x38, 2)
+        if (!replyAvailable) output.writeVarIntField(0x50, 4)
         // Values used by the original Health app for the SMS presentation and reply model.
         output.writeVarIntField(0x68, 27)
         output.writeVarIntField(0x70, 16)
         return output.toByteArray()
+    }
+
+    fun cortana(status: Int, message: String): ByteArray {
+        val encoded = message.take(160).toByteArray(Charsets.UTF_16LE).copyOf(320)
+        return BandPacketCodec.littleEndianShort(status) +
+            BandPacketCodec.littleEndianShort(320) + byteArrayOf(0, 0) + encoded
     }
 
     /** Creates or updates a native Calls-tile entry. */

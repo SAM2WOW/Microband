@@ -41,6 +41,11 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
         val posted = notification ?: return
         if (posted.packageName == packageName || posted.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         val normalized = normalize(posted)
+        posted.notification.actions.orEmpty().firstOrNull { action ->
+            !action.remoteInputs.isNullOrEmpty() && action.actionIntent != null
+        }?.let { action ->
+            BandReplyRegistry.register(posted.key, action.actionIntent, action.remoteInputs)
+        }
         val category = NotificationClassifier.classify(
             posted.packageName,
             normalized.sourceLabel,
@@ -71,6 +76,7 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationRemoved(notification: StatusBarNotification?) {
         val posted = notification ?: return
+        BandReplyRegistry.remove(posted.key)
         val call = activeCalls.remove(posted.key) ?: return
         scope.launch {
             val app = application as MicrobandApplication

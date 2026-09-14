@@ -11,6 +11,7 @@ object BandConstants {
     const val FACILITY_JUTIL = 0x76
     const val FACILITY_CONFIGURATION = 0x78
     const val FACILITY_REMOTE_SUBSCRIPTION = 0x8F
+    const val FACILITY_KEYBOARD = 0x9F
     const val FACILITY_SRAM_FIRMWARE_UPDATE = 0x98
     const val FACILITY_OOBE = 0xAD
     const val FACILITY_FIREBALL_UI = 0xC3
@@ -21,4 +22,5 @@ object BandConstants {
     const val FACILITY_PERSISTED_STATISTICS = 0xCE
     const val FACILITY_INSTALLED_APP_LIST = 0xD4
     const val FACILITY_THEME_COLOR = 0xD8
+    const val FACILITY_CORTANA = 0xDD
 }

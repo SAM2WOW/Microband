@@ -283,9 +283,9 @@ class BandProtocol(private val transport: BandTransport) {
         }
     }
 
-    suspend fun showMessage(sender: String, body: String, timestamp: Instant, messageId: Int = 0) {
+    suspend fun showMessage(sender: String, body: String, timestamp: Instant, messageId: Int = 0, replyAvailable: Boolean = true) {
         firmwareUiMutex.withLock {
-            val payload = BandNotificationCodec.sms(sender, body, timestamp, messageId)
+            val payload = BandNotificationCodec.sms(sender, body, timestamp, messageId, replyAvailable)
             write(
                 facility = BandConstants.FACILITY_NOTIFICATION,
                 code = 5,
@@ -294,6 +294,22 @@ class BandProtocol(private val transport: BandTransport) {
             )
         }
     }
+
+    suspend fun sendCortanaStatus(status: Int, message: String) = write(
+        BandConstants.FACILITY_CORTANA,
+        0,
+        BandNotificationCodec.cortana(status, message),
+    )
+
+    suspend fun stopCortana() = write(BandConstants.FACILITY_CORTANA, 2, byteArrayOf())
+
+    suspend fun cancelCortana() = write(BandConstants.FACILITY_CORTANA, 3, byteArrayOf())
+
+    suspend fun sendKeyboardCommand(type: Int, candidates: List<String> = emptyList()) = write(
+        BandConstants.FACILITY_KEYBOARD,
+        0,
+        BandKeyboardCodec.command(type, candidates),
+    )
 
     suspend fun showCall(caller: String, callId: Int, timestamp: Instant, type: BandNotificationCodec.CallType) {
         firmwareUiMutex.withLock {

@@ -2,14 +2,20 @@ package com.unsame.microband.bluetooth
 
 import android.app.Application
 import android.bluetooth.BluetoothDevice
+import android.util.Log
 import com.unsame.microband.band.model.BandConnectionState
 import com.unsame.microband.band.model.BandDeviceInfo
 import com.unsame.microband.band.model.BandException
 import com.unsame.microband.band.oobe.BandOobeManager
 import com.unsame.microband.band.oobe.BandOobeStep
 import com.unsame.microband.band.protocol.BandPacketCodec.hex
+import com.unsame.microband.band.protocol.BandPacketCodec
 import com.unsame.microband.band.protocol.BandProtocol
 import com.unsame.microband.band.transport.RfcommBandTransport
+import com.unsame.microband.band.transport.BandPushPacket
+import com.unsame.microband.band.transport.BandPushServiceTransport
+import com.unsame.microband.assistant.GeminiBandAssistant
+import com.unsame.microband.assistant.GeminiKeyStore
 import com.unsame.microband.data.MicrobandPreferences
 import com.unsame.microband.data.HealthSnapshotDao
 import com.unsame.microband.data.HealthDailyDao
@@ -27,7 +33,10 @@ import com.unsame.microband.band.model.BandTileCatalog
 import com.unsame.microband.band.model.BandTileInfo
 import com.unsame.microband.notification.BandPhoneNotification
 import com.unsame.microband.notification.BandNotificationKind
+import com.unsame.microband.notification.BandReplyRegistry
 import com.unsame.microband.band.protocol.BandNotificationCodec
+import com.unsame.microband.band.protocol.BandPushCodec
+import com.unsame.microband.band.protocol.BandKeyboardCodec
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.LocalDate
@@ -53,6 +62,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
@@ -84,6 +95,8 @@ class BandConnectionManager(
     val firmwareUpdate: StateFlow<FirmwareUpdateStatus> = mutableFirmwareUpdate.asStateFlow()
     private val mutableTiles = MutableStateFlow(BandTileCatalog())
     val tiles: StateFlow<BandTileCatalog> = mutableTiles.asStateFlow()
+    private val mutablePushServiceConnected = MutableStateFlow(false)
+    val pushServiceConnected: StateFlow<Boolean> = mutablePushServiceConnected.asStateFlow()
 
     private var redactNextTransfer = false
     private var redactNextReceive = false
@@ -111,11 +124,16 @@ class BandConnectionManager(
         }
     }
     private val protocol = BandProtocol(transport)
+    private val pushTransport = BandPushServiceTransport()
+    private val geminiAssistant = GeminiBandAssistant(GeminiKeyStore(application))
     private val connectionMutex = Mutex()
     private val oobeManager = BandOobeManager(preferences)
     private var activeDevice: BluetoothDevice? = null
     private var inspectedInfo: BandDeviceInfo? = null
     @Volatile private var keepConnected = false
+    private var pushJob: Job? = null
+    private var voiceAudio = java.io.ByteArrayOutputStream()
+    private var voiceIsDictation = false
 
     init {
         scope.launch {
@@ -149,6 +167,7 @@ class BandConnectionManager(
         transport.connect(device)
         val name = runCatching { device.name }.getOrNull() ?: "Microsoft Band"
         mutableState.value = BandConnectionState.Connected(BandDeviceInfo(name))
+        startPushService(device)
         // The official SDK negotiates protocol version before requesting sensors.
         // Older firmware may reject this command, so a failed negotiation must not
         // prevent basic time/notification operations.
@@ -228,6 +247,10 @@ class BandConnectionManager(
 
     fun disconnect() = scope.launch {
         keepConnected = false
+        pushJob?.cancel()
+        pushJob = null
+        pushTransport.disconnect()
+        mutablePushServiceConnected.value = false
         connectionMutex.withLock {
             transport.disconnect()
             inspectedInfo = null
@@ -343,6 +366,10 @@ class BandConnectionManager(
                 updateFirmwareState(FirmwareUpdateStage.Downloading, (percent * 20 / 100).coerceAtLeast(1), "Downloading firmware • $percent%")
             }
             keepConnected = false
+            pushJob?.cancel()
+            pushJob = null
+            pushTransport.disconnect()
+            mutablePushServiceConnected.value = false
             connectionMutex.withLock {
                 performFirmwareUpdate(device, file)
             }
@@ -561,6 +588,7 @@ class BandConnectionManager(
                         ?: "New notification from ${notification.sourceLabel}",
                     timestamp = notification.timestamp,
                     messageId = stableNotificationId(notification.notificationKey),
+                    replyAvailable = BandReplyRegistry.canReply(stableNotificationId(notification.notificationKey)),
                 )
                 else -> protocol.showCall(
                     caller = notification.title?.takeIf { it.isNotBlank() }
@@ -665,6 +693,97 @@ class BandConnectionManager(
 
     private fun stableNotificationId(key: String): Int = (key.hashCode() and Int.MAX_VALUE).coerceAtLeast(1)
 
+    fun geminiConfigured(): Boolean = geminiAssistant.isConfigured()
+
+    fun saveGeminiKey(apiKey: String) {
+        geminiAssistant.saveKey(apiKey)
+    }
+
+    fun clearGeminiKey() {
+        geminiAssistant.clearKey()
+    }
+
+    private fun startPushService(device: BluetoothDevice) {
+        if (pushJob?.isActive == true) return
+        pushJob = scope.launch {
+            var announced = false
+            while (isActive && keepConnected) {
+                runCatching {
+                    pushTransport.connectAndListen(device, onConnected = {
+                        if (!mutablePushServiceConnected.value) {
+                            mutablePushServiceConnected.value = true
+                            if (!announced) mutableEvents.emit("Band replies and voice connected")
+                            announced = true
+                        }
+                    }) { packet ->
+                        handlePushPacket(packet)
+                    }
+                }
+                mutablePushServiceConnected.value = false
+                if (isActive && keepConnected) delay(5_000)
+            }
+        }
+    }
+
+    private suspend fun handlePushPacket(packet: BandPushPacket) {
+        Log.d("MicrobandPush", "Received Band push type=${packet.type}, length=${packet.payload.size}")
+        when (packet.type) {
+            PUSH_SMS_REPLY -> handleBandReply(packet.payload)
+            PUSH_KEYBOARD -> handleKeyboardEvent(packet.payload)
+            PUSH_VOICE_BEGIN -> {
+                voiceAudio = java.io.ByteArrayOutputStream()
+                voiceIsDictation = packet.payload.size >= 20 && BandPacketCodec.readLong(packet.payload, 12) == 2L
+                if (!preferences.geminiAssistantEnabled.first() || !geminiAssistant.isConfigured()) {
+                    runCatching { protocol.sendCortanaStatus(CORTANA_ERROR, "Enable Gemini assistant in Microband Settings") }
+                    mutableEvents.emit("Cortana reached Microband. Add a Gemini API key in Settings to answer.")
+                } else {
+                    runCatching { protocol.sendCortanaStatus(CORTANA_NON_FINAL, "Listening…") }
+                }
+            }
+            PUSH_VOICE_DATA -> if (voiceAudio.size() + packet.payload.size <= MAX_VOICE_BYTES) {
+                voiceAudio.write(packet.payload)
+            }
+            PUSH_VOICE_END -> finishGeminiVoiceRequest()
+            PUSH_VOICE_CANCEL -> {
+                voiceAudio.reset()
+                runCatching { protocol.cancelCortana() }
+            }
+        }
+    }
+
+    private suspend fun handleKeyboardEvent(payload: ByteArray) {
+        val type = BandKeyboardCodec.eventType(payload) ?: return
+        Log.d("MicrobandPush", "Keyboard event subtype=$type")
+        when (type) {
+            BandKeyboardCodec.INIT -> protocol.sendKeyboardCommand(BandKeyboardCodec.INIT)
+            BandKeyboardCodec.CANDIDATES_FOR_WORD ->
+                protocol.sendKeyboardCommand(BandKeyboardCodec.CANDIDATES_FOR_WORD)
+        }
+    }
+
+    private suspend fun handleBandReply(payload: ByteArray) {
+        val reply = BandPushCodec.decodeReply(payload) ?: return
+        BandReplyRegistry.send(application, reply.notificationId, reply.text)
+            .onSuccess { mutableEvents.emit("Reply sent from Band") }
+            .onFailure { mutableEvents.emit("Band reply could not be sent: ${it.message}") }
+    }
+
+    private suspend fun finishGeminiVoiceRequest() {
+        val audio = voiceAudio.toByteArray()
+        voiceAudio.reset()
+        if (!preferences.geminiAssistantEnabled.first() || !geminiAssistant.isConfigured()) return
+        val dictation = voiceIsDictation
+        runCatching { geminiAssistant.answer(audio, dictation) }
+            .onSuccess { answer ->
+                protocol.sendCortanaStatus(if (dictation) CORTANA_TEXT_DICTATION else CORTANA_FINAL, answer)
+                mutableEvents.emit(if (dictation) "Gemini transcribed the Band reply" else "Gemini answered on the Band")
+            }
+            .onFailure { error ->
+                runCatching { protocol.sendCortanaStatus(CORTANA_ERROR, error.userMessage().take(150)) }
+                mutableEvents.emit("Gemini voice failed: ${error.userMessage()}")
+            }
+    }
+
     private fun Throwable.userMessage(): String = when (this) {
         is BandException -> message ?: "Band operation failed"
         else -> message ?: "Band operation failed"
@@ -677,5 +796,16 @@ class BandConnectionManager(
         private const val LATEST_FIRMWARE_URL = "https://raw.githubusercontent.com/MicrosoftBandDev/archive/main/Firmware/Band%202%20(2.0.5202.0)/envoy-2.0.5202.0.bin"
         private val SENSITIVE_TRANSFER_COMMANDS = setOf(0xCC05, 0xC311)
         private val SENSITIVE_RESPONSE_COMMANDS = setOf(0x8F83, 0xCE82, 0xCE83, 0xCE84)
+        private const val PUSH_SMS_REPLY = 100
+        private const val PUSH_VOICE_BEGIN = 200
+        private const val PUSH_VOICE_DATA = 201
+        private const val PUSH_VOICE_END = 202
+        private const val PUSH_VOICE_CANCEL = 203
+        private const val PUSH_KEYBOARD = 220
+        private const val CORTANA_FINAL = 1
+        private const val CORTANA_ERROR = 2
+        private const val CORTANA_NON_FINAL = 5
+        private const val CORTANA_TEXT_DICTATION = 8
+        private const val MAX_VOICE_BYTES = 2 * 1024 * 1024
     }
 }

@@ -31,6 +31,8 @@ Microband is early-stage software built around reverse-engineered interoperabili
 | First-run Band setup/OOBE completion | Working |
 | UTC, local time, and timezone sync | Working |
 | Native Messages and Calls forwarding | Experimental |
+| Band notification replies | Experimental |
+| Gemini-powered Cortana voice bridge | Experimental |
 | Notification filters and privacy controls | Working |
 | Theme colors | Working |
 | Me Tile wallpaper | Experimental |
@@ -52,6 +54,7 @@ Microsoft Band 1 is not currently supported.
 - Safely resumes and completes first-run Band 2 setup.
 - Synchronizes both UTC and displayed local time.
 - Forwards selected Android notifications into the Band's native Messages tile and sends phone-call lifecycle updates to its Calls tile, with persistent filters, duplicate suppression, rate limiting, locked-phone privacy, and automatic reconnection.
+- Maintains the Band's separate reply/voice RFCOMM service, forwards Band replies through the originating Android notification's direct-reply action, and optionally routes Cortana audio or notification dictation through Gemini.
 - Reads daily steps, calories, distance, floors, elevation, and UV plus the latest run, exercise, and sleep summaries directly from the Band; daily readings build private week and month charts on the phone.
 - Changes the Band's six-color theme using an expanded preset palette or a custom hue, saturation, and brightness picker.
 - Center-crops photos locally into the Band 2's 310 × 128 Me Tile format.
@@ -65,12 +68,13 @@ Microsoft Band 1 is not currently supported.
 - Android 12 or newer (API 31+)
 - Bluetooth and Nearby devices access
 - Notification access, only if notification forwarding is wanted
+- A user-supplied Gemini API key, only if the optional Cortana bridge is wanted
 
 Development requires JDK 17 and an Android SDK containing API 37.
 
 ## Installation
 
-Prebuilt releases are not published yet. For now, build and install a debug APK from source.
+Download the latest preview APK from [GitHub Releases](https://github.com/SAM2WOW/Microband/releases), or build from source:
 
 ```bash
 git clone https://github.com/SAM2WOW/Microband.git
@@ -103,6 +107,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 7. Open **Notifications** to choose which alerts may appear on the Band.
 8. Open **Personalize** to select a preset or custom theme color, choose a Me Tile wallpaper, manage built-in tiles, or view the Band's supported Watch Mode options.
 
+To try the experimental voice bridge, open **Settings → Gemini on Cortana**, enter your own Gemini API key, and enable the switch. The key is encrypted with Android Keystore. Band microphone audio is sent to Google's Gemini API only after you explicitly start Cortana or dictation on the Band.
+
 Microband's notification listener runs without keeping the app screen open. On phones with aggressive power management, open **Notifications → Allow background operation**, disable battery optimization for Microband, and allow background activity or Auto-start if the manufacturer provides those controls.
 
 If the Band was previously paired with another phone, remove that pairing from the Band before trying again.
@@ -114,11 +120,13 @@ Microband is local-first by design:
 - no Microsoft account;
 - no analytics or telemetry;
 - no custom backend;
-- no cloud upload;
+- no background cloud upload;
 - no advertising SDK;
 - notification access is optional;
 - notification bodies are never persisted in protocol logs;
 - selected wallpaper pixels are processed locally and redacted from protocol logs.
+
+The optional Gemini voice bridge is the sole exception to local-only processing: when enabled and invoked, it sends the current Band microphone recording to the Google Gemini API. It is disabled by default, requires the user's own API key, and never writes voice audio to app storage.
 
 ## Firmware safety
 
@@ -155,7 +163,7 @@ MicrobandViewModel
               BandProtocol
                     │
                     ▼
-            RFCOMM Band transport
+        RFCOMM command + push transports
 ```
 
 `BandConnectionManager` is the single owner of the active Band transport. Protocol commands are serialized so screens and background notification forwarding do not create competing Bluetooth sockets.

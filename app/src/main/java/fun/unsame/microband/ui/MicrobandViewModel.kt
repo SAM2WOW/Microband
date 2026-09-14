@@ -63,6 +63,9 @@ data class MicrobandUiState(
     val personalizationBusy: Boolean = false,
     val firmwareUpdate: FirmwareUpdateStatus = FirmwareUpdateStatus(),
     val tiles: BandTileCatalog = BandTileCatalog(),
+    val bandReplyServiceConnected: Boolean = false,
+    val geminiAssistantEnabled: Boolean = false,
+    val geminiConfigured: Boolean = false,
 )
 
 class MicrobandViewModel(
@@ -85,12 +88,15 @@ class MicrobandViewModel(
         viewModelScope.launch { connectionManager.healthHistory.collect { value -> mutableState.update { it.copy(healthHistory = value) } } }
         viewModelScope.launch { connectionManager.firmwareUpdate.collect { value -> mutableState.update { it.copy(firmwareUpdate = value) } } }
         viewModelScope.launch { connectionManager.tiles.collect { value -> mutableState.update { it.copy(tiles = value) } } }
+        viewModelScope.launch { connectionManager.pushServiceConnected.collect { value -> mutableState.update { it.copy(bandReplyServiceConnected = value) } } }
         viewModelScope.launch { preferences.protocolLogging.collect { value -> mutableState.update { it.copy(protocolLogging = value) } } }
         viewModelScope.launch { preferences.allNotificationsEnabled.collect { value -> mutableState.update { it.copy(allNotificationsEnabled = value) } } }
         viewModelScope.launch { preferences.disabledNotificationPackages.collect { value -> mutableState.update { it.copy(disabledNotificationPackages = value) } } }
         viewModelScope.launch { preferences.notificationActivity.collect { value -> notificationActivity = value; rebuildNotificationApps() } }
         viewModelScope.launch { preferences.themeAccent.collect { value -> mutableState.update { it.copy(themeAccent = value) } } }
+        viewModelScope.launch { preferences.geminiAssistantEnabled.collect { value -> mutableState.update { it.copy(geminiAssistantEnabled = value) } } }
         viewModelScope.launch { connectionManager.events.collect { value -> mutableState.update { it.copy(message = value) } } }
+        mutableState.update { it.copy(geminiConfigured = connectionManager.geminiConfigured()) }
     }
 
     fun refresh() = viewModelScope.launch {
@@ -252,6 +258,29 @@ class MicrobandViewModel(
     }
 
     fun setAllNotifications(enabled: Boolean) = viewModelScope.launch { preferences.setAllNotificationsEnabled(enabled) }
+
+    fun setGeminiAssistantEnabled(enabled: Boolean) = viewModelScope.launch {
+        if (enabled && !connectionManager.geminiConfigured()) {
+            mutableState.update { it.copy(message = "Save a Gemini API key first") }
+        } else {
+            preferences.setGeminiAssistantEnabled(enabled)
+        }
+    }
+
+    fun saveGeminiApiKey(value: String) {
+        runCatching { connectionManager.saveGeminiKey(value) }
+            .onSuccess {
+                mutableState.update { it.copy(geminiConfigured = true, message = "Gemini API key saved securely") }
+                viewModelScope.launch { preferences.setGeminiAssistantEnabled(true) }
+            }
+            .onFailure { mutableState.update { state -> state.copy(message = it.message ?: "Could not save Gemini API key") } }
+    }
+
+    fun clearGeminiApiKey() {
+        connectionManager.clearGeminiKey()
+        mutableState.update { it.copy(geminiConfigured = false, message = "Gemini API key removed") }
+        viewModelScope.launch { preferences.setGeminiAssistantEnabled(false) }
+    }
 
     fun sendTestNotification() = connectionManager.sendTestNotification()
     fun refreshHealthData() = connectionManager.refreshHealthData()

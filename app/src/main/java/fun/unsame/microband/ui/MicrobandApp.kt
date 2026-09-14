@@ -53,6 +53,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Favorite
@@ -89,6 +90,7 @@ import androidx.compose.material.icons.rounded.Mail
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsOff
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.ShowChart
@@ -116,6 +118,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.unsame.microband.R
 import com.unsame.microband.band.model.BandConnectionState
@@ -169,6 +172,9 @@ fun MicrobandApp(
     onStartFirmwareUpdate: () -> Unit,
     onOpenFirmwareArchive: () -> Unit,
     onChooseFirmwarePackage: () -> Unit,
+    onSetGeminiEnabled: (Boolean) -> Unit,
+    onSaveGeminiKey: (String) -> Unit,
+    onClearGeminiKey: () -> Unit,
 ) {
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it) } }
@@ -246,6 +252,9 @@ fun MicrobandApp(
                     onSetAllNotifications = onSetAllNotifications,
                     onSendTestNotification = onSendTestNotification,
                     onOpenBatteryOptimization = onOpenBatteryOptimization,
+                    onSetGeminiEnabled = onSetGeminiEnabled,
+                    onSaveGeminiKey = onSaveGeminiKey,
+                    onClearGeminiKey = onClearGeminiKey,
                     modifier = Modifier,
                 )
                     }
@@ -1094,6 +1103,9 @@ private fun SettingsContainer(
     onSetAllNotifications: (Boolean) -> Unit,
     onSendTestNotification: () -> Unit,
     onOpenBatteryOptimization: () -> Unit,
+    onSetGeminiEnabled: (Boolean) -> Unit,
+    onSaveGeminiKey: (String) -> Unit,
+    onClearGeminiKey: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var developerOpen by rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
@@ -1103,6 +1115,7 @@ private fun SettingsContainer(
         SettingsScreen(
             state, onSetProtocolLogging, onOpenFirmwareArchive, onChooseFirmwarePackage, onStartFirmwareUpdate,
             onOpenNotificationAccess, onSetNotificationPackage, onSetAllNotifications, onSendTestNotification, onOpenBatteryOptimization,
+            onSetGeminiEnabled, onSaveGeminiKey, onClearGeminiKey,
             { developerOpen = true }, modifier,
         )
     }
@@ -1120,6 +1133,9 @@ private fun SettingsScreen(
     onSetAllNotifications: (Boolean) -> Unit,
     onSendTestNotification: () -> Unit,
     onOpenBatteryOptimization: () -> Unit,
+    onSetGeminiEnabled: (Boolean) -> Unit,
+    onSaveGeminiKey: (String) -> Unit,
+    onClearGeminiKey: () -> Unit,
     onOpenDeveloper: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1150,6 +1166,49 @@ private fun SettingsScreen(
             }
         }
         item {
+            var apiKey by rememberSaveable { mutableStateOf("") }
+            Card(shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(Icons.Rounded.AutoAwesome, contentDescription = null)
+                        Column(Modifier.weight(1f)) {
+                            Text("Gemini on Cortana", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (state.bandReplyServiceConnected) "Band voice channel connected" else "Connect the Band to use voice",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = state.geminiAssistantEnabled,
+                            onCheckedChange = onSetGeminiEnabled,
+                            enabled = state.geminiConfigured,
+                        )
+                    }
+                    Text(
+                        "Experimental. Cortana microphone audio is sent to the Google Gemini API only when you invoke it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (!state.geminiConfigured) {
+                        OutlinedTextField(
+                            value = apiKey,
+                            onValueChange = { apiKey = it },
+                            label = { Text("Gemini API key") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Button(onClick = { onSaveGeminiKey(apiKey); apiKey = "" }, enabled = apiKey.isNotBlank()) {
+                            Text("Save and enable")
+                        }
+                    } else {
+                        TextButton(onClick = onClearGeminiKey) { Text("Remove API key") }
+                    }
+                }
+            }
+        }
+        item {
             FirmwareCard(
                 (state.connection as? BandConnectionState.Connected)?.device,
                 state.firmwarePackageStatus,
@@ -1164,7 +1223,7 @@ private fun SettingsScreen(
                 Text("Open Developer tools")
             }
         }
-        item { Text("Microband 0.7.0", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Microband 0.8.0", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 

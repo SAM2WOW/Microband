@@ -35,6 +35,12 @@ class BandNotificationCodecTest {
     }
 
     @Test
+    fun smsCanSuppressUnavailableAndroidReply() {
+        val packet = BandNotificationCodec.sms("Alex", "Hello", Instant.EPOCH, replyAvailable = false)
+        assertEquals(true, packet.toList().windowed(2).any { it == listOf(0x50.toByte(), 0x04.toByte()) })
+    }
+
+    @Test
     fun callUsesNativeCallsTileAndCallState() {
         val packet = BandNotificationCodec.call("Alex", 42, Instant.EPOCH, BandNotificationCodec.CallType.Missed)
         val hex = packet.hex()
