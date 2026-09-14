@@ -161,6 +161,7 @@ fun MicrobandApp(
     onOpenNotificationAccess: () -> Unit,
     onSetNotificationPackage: (String, Boolean) -> Unit,
     onSetAllNotifications: (Boolean) -> Unit,
+    onSetMaskNotificationsWhenLocked: (Boolean) -> Unit,
     onSendTestNotification: () -> Unit,
     onOpenBatteryOptimization: () -> Unit,
     onRefreshHealth: () -> Unit,
@@ -250,6 +251,7 @@ fun MicrobandApp(
                     onOpenNotificationAccess = onOpenNotificationAccess,
                     onSetNotificationPackage = onSetNotificationPackage,
                     onSetAllNotifications = onSetAllNotifications,
+                    onSetMaskNotificationsWhenLocked = onSetMaskNotificationsWhenLocked,
                     onSendTestNotification = onSendTestNotification,
                     onOpenBatteryOptimization = onOpenBatteryOptimization,
                     onSetGeminiEnabled = onSetGeminiEnabled,
@@ -727,10 +729,12 @@ private fun NotificationSettingsSection(
     apps: List<NotificationAppInfo>,
     allEnabled: Boolean,
     disabledPackages: Set<String>,
+    maskWhenLocked: Boolean,
     connected: Boolean,
     onOpenNotificationAccess: () -> Unit,
     onSetPackage: (String, Boolean) -> Unit,
     onSetAll: (Boolean) -> Unit,
+    onSetMaskWhenLocked: (Boolean) -> Unit,
     onSendTestNotification: () -> Unit,
     onOpenBatteryOptimization: () -> Unit,
 ) {
@@ -748,6 +752,13 @@ private fun NotificationSettingsSection(
                 else FilledTonalButton(onClick = onOpenNotificationAccess, modifier = Modifier.fillMaxWidth()) { Text("Manage access") }
                 if (!batteryOptimizationIgnored) FilledTonalButton(onClick = onOpenBatteryOptimization, modifier = Modifier.fillMaxWidth()) { Text("Allow background use") }
             }
+        }
+        Card(shape = RoundedCornerShape(20.dp)) {
+            ListItem(
+                headlineContent = { Text("Mask content when phone is locked") },
+                supportingContent = { Text("Replace the message body with a placeholder if your phone is locked when a notification arrives.") },
+                trailingContent = { Switch(maskWhenLocked, onCheckedChange = onSetMaskWhenLocked) },
+            )
         }
         Card(shape = RoundedCornerShape(20.dp)) {
             Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
@@ -1101,6 +1112,7 @@ private fun SettingsContainer(
     onOpenNotificationAccess: () -> Unit,
     onSetNotificationPackage: (String, Boolean) -> Unit,
     onSetAllNotifications: (Boolean) -> Unit,
+    onSetMaskNotificationsWhenLocked: (Boolean) -> Unit,
     onSendTestNotification: () -> Unit,
     onOpenBatteryOptimization: () -> Unit,
     onSetGeminiEnabled: (Boolean) -> Unit,
@@ -1114,7 +1126,8 @@ private fun SettingsContainer(
     } else {
         SettingsScreen(
             state, onSetProtocolLogging, onOpenFirmwareArchive, onChooseFirmwarePackage, onStartFirmwareUpdate,
-            onOpenNotificationAccess, onSetNotificationPackage, onSetAllNotifications, onSendTestNotification, onOpenBatteryOptimization,
+            onOpenNotificationAccess, onSetNotificationPackage, onSetAllNotifications, onSetMaskNotificationsWhenLocked,
+            onSendTestNotification, onOpenBatteryOptimization,
             onSetGeminiEnabled, onSaveGeminiKey, onClearGeminiKey,
             { developerOpen = true }, modifier,
         )
@@ -1131,6 +1144,7 @@ private fun SettingsScreen(
     onOpenNotificationAccess: () -> Unit,
     onSetNotificationPackage: (String, Boolean) -> Unit,
     onSetAllNotifications: (Boolean) -> Unit,
+    onSetMaskNotificationsWhenLocked: (Boolean) -> Unit,
     onSendTestNotification: () -> Unit,
     onOpenBatteryOptimization: () -> Unit,
     onSetGeminiEnabled: (Boolean) -> Unit,
@@ -1148,10 +1162,12 @@ private fun SettingsScreen(
                 state.notificationApps,
                 state.allNotificationsEnabled,
                 state.disabledNotificationPackages,
+                state.maskNotificationsWhenLocked,
                 state.connection is BandConnectionState.Connected,
                 onOpenNotificationAccess,
                 onSetNotificationPackage,
                 onSetAllNotifications,
+                onSetMaskNotificationsWhenLocked,
                 onSendTestNotification,
                 onOpenBatteryOptimization,
             )

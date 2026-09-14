@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -66,7 +67,8 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
             if (!shouldSend(normalized, kind)) return@launch
 
             val keyguard = getSystemService(KeyguardManager::class.java)
-            val privateSafe = if (keyguard?.isDeviceLocked == true) {
+            val maskWhenLocked = app.preferences.maskNotificationsWhenLocked.first()
+            val privateSafe = if (maskWhenLocked && keyguard?.isDeviceLocked == true) {
                 normalized.copy(body = "Unlock your phone to read this notification")
             } else normalized
             val association = runCatching { app.associationManager.currentAssociation() }.getOrNull() ?: return@launch

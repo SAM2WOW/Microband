@@ -55,6 +55,7 @@ data class MicrobandUiState(
     val notificationApps: List<NotificationAppInfo> = emptyList(),
     val allNotificationsEnabled: Boolean = true,
     val disabledNotificationPackages: Set<String> = emptySet(),
+    val maskNotificationsWhenLocked: Boolean = true,
     val batteryOptimizationIgnored: Boolean = false,
     val healthSnapshot: BandHealthSnapshot? = null,
     val healthSyncInProgress: Boolean = false,
@@ -92,6 +93,7 @@ class MicrobandViewModel(
         viewModelScope.launch { preferences.protocolLogging.collect { value -> mutableState.update { it.copy(protocolLogging = value) } } }
         viewModelScope.launch { preferences.allNotificationsEnabled.collect { value -> mutableState.update { it.copy(allNotificationsEnabled = value) } } }
         viewModelScope.launch { preferences.disabledNotificationPackages.collect { value -> mutableState.update { it.copy(disabledNotificationPackages = value) } } }
+        viewModelScope.launch { preferences.maskNotificationsWhenLocked.collect { value -> mutableState.update { it.copy(maskNotificationsWhenLocked = value) } } }
         viewModelScope.launch { preferences.notificationActivity.collect { value -> notificationActivity = value; rebuildNotificationApps() } }
         viewModelScope.launch { preferences.themeAccent.collect { value -> mutableState.update { it.copy(themeAccent = value) } } }
         viewModelScope.launch { preferences.geminiAssistantEnabled.collect { value -> mutableState.update { it.copy(geminiAssistantEnabled = value) } } }
@@ -258,6 +260,10 @@ class MicrobandViewModel(
     }
 
     fun setAllNotifications(enabled: Boolean) = viewModelScope.launch { preferences.setAllNotificationsEnabled(enabled) }
+
+    fun setMaskNotificationsWhenLocked(enabled: Boolean) = viewModelScope.launch {
+        preferences.setMaskNotificationsWhenLocked(enabled)
+    }
 
     fun setGeminiAssistantEnabled(enabled: Boolean) = viewModelScope.launch {
         if (enabled && !connectionManager.geminiConfigured()) {
