@@ -1,0 +1,41 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Decode release keystore
+        run: echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.MICROBAND_RELEASE_KEYSTORE_BASE64 }}
+
+      - name: Build signed release APK
+        run: ./gradlew :app:assembleRelease --no-daemon
+        env:
+          MICROBAND_RELEASE_STORE_FILE: ${{ format('{0}/release.jks', runner.temp) }}
+          MICROBAND_RELEASE_STORE_PASSWORD: ${{ secrets.MICROBAND_RELEASE_STORE_PASSWORD }}
+          MICROBAND_RELEASE_KEY_ALIAS: ${{ secrets.MICROBAND_RELEASE_KEY_ALIAS }}
+          MICROBAND_RELEASE_KEY_PASSWORD: ${{ secrets.MICROBAND_RELEASE_KEY_PASSWORD }}
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/app-release.apk
+          generate_release_notes: true

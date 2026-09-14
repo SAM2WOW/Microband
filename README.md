@@ -146,6 +146,10 @@ The unit tests cover packet framing, status parsing, time conversion, timezone p
 
 A physical Band 2 is required to validate Bluetooth discovery, RFCOMM behavior, OOBE, notification display, health sync, themes, wallpapers, tile changes, and firmware operations.
 
+### Signed release builds
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds a minified `assembleRelease` APK and publishes it as a GitHub release. The release signing key never lives in the repo: the workflow decodes it from the `MICROBAND_RELEASE_KEYSTORE_BASE64` repository secret and passes the store/key passwords and alias through `MICROBAND_RELEASE_STORE_PASSWORD`, `MICROBAND_RELEASE_KEY_ALIAS`, and `MICROBAND_RELEASE_KEY_PASSWORD`. Without those secrets (e.g. a local `assembleRelease`), the release build type is left unsigned.
+
 ## Architecture
 
 ```text
