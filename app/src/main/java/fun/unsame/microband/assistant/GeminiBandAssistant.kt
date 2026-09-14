@@ -82,6 +82,6 @@ class GeminiBandAssistant(private val keyStore: GeminiKeyStore) {
 
     private companion object {
         const val SAMPLE_RATE = 16_000
-        const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
     }
 }
