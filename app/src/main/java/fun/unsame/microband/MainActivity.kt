@@ -1,19 +1,15 @@
 package com.unsame.microband
 
 import android.Manifest
-import android.app.Activity
-import android.content.IntentSender
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.unsame.microband.ui.MicrobandApp
@@ -35,9 +31,6 @@ class MainActivity : ComponentActivity() {
             MicrobandTheme {
                 val context = LocalContext.current
                 val state by viewModel.state.collectAsStateWithLifecycle()
-                val associationLauncher = rememberLauncherForActivityResult(
-                    ActivityResultContracts.StartIntentSenderForResult(),
-                ) { result -> viewModel.onAssociationResult(result.resultCode == Activity.RESULT_OK) }
                 val permissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions(),
                 ) { viewModel.refresh() }
@@ -48,10 +41,6 @@ class MainActivity : ComponentActivity() {
                     ActivityResultContracts.OpenDocument(),
                 ) { uri -> uri?.let { viewModel.setWallpaper(context, it) } }
 
-                val launchAssociation: (IntentSender) -> Unit = remember(associationLauncher) {
-                    { sender -> associationLauncher.launch(IntentSenderRequest.Builder(sender).build()) }
-                }
-
                 LaunchedEffect(Unit) { viewModel.refresh() }
                 LaunchedEffect(Unit) { viewModel.refreshNotificationAccess(context) }
                 LaunchedEffect(Unit) { viewModel.refreshBackgroundStatus(context) }
@@ -60,11 +49,9 @@ class MainActivity : ComponentActivity() {
                 MicrobandApp(
                     state = state,
                     onRequestBluetoothPermissions = {
-                        permissionLauncher.launch(
-                            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT),
-                        )
+                        permissionLauncher.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT))
                     },
-                    onFindBand = { viewModel.findBand(launchAssociation) },
+                    onOpenBluetoothSettings = { viewModel.openBluetoothSettings(context) },
                     onRefreshPairedDevices = viewModel::refreshPairedDevices,
                     onSelectPairedDevice = viewModel::selectPairedDevice,
                     onConnect = viewModel::connect,

@@ -8,20 +8,13 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.unsame.microband.band.oobe.BandOobeStep
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 
 private val Context.dataStore by preferencesDataStore("microband")
 
 class MicrobandPreferences(private val context: Context) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    val associationId: Flow<Int?> = context.dataStore.data.map { it[ASSOCIATION_ID] }
     val manualDeviceAddress: Flow<String?> = context.dataStore.data.map { it[MANUAL_DEVICE_ADDRESS] }
     val protocolLogging: Flow<Boolean> = context.dataStore.data.map { it[PROTOCOL_LOGGING] ?: false }
     val allNotificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALL_NOTIFICATIONS_ENABLED] ?: true }
@@ -35,22 +28,6 @@ class MicrobandPreferences(private val context: Context) {
     val oobeStep: Flow<BandOobeStep> = context.dataStore.data.map { preferences ->
         preferences[OOBE_STEP]?.let { runCatching { BandOobeStep.valueOf(it) }.getOrNull() }
             ?: BandOobeStep.Inspect
-    }
-
-    suspend fun setAssociationId(value: Int) {
-        context.dataStore.edit { it[ASSOCIATION_ID] = value }
-    }
-
-    fun setAssociationIdAsync(value: Int) {
-        scope.launch { setAssociationId(value) }
-    }
-
-    suspend fun clearAssociationId() {
-        context.dataStore.edit { it.remove(ASSOCIATION_ID) }
-    }
-
-    fun clearManualDeviceAddressAsync() {
-        scope.launch { setManualDeviceAddress(null) }
     }
 
     suspend fun setManualDeviceAddress(address: String?) {
@@ -121,7 +98,6 @@ class MicrobandPreferences(private val context: Context) {
     }
 
     companion object {
-        private val ASSOCIATION_ID = intPreferencesKey("association_id")
         private val MANUAL_DEVICE_ADDRESS = stringPreferencesKey("manual_device_address")
         private val PROTOCOL_LOGGING = booleanPreferencesKey("protocol_logging")
         private val OOBE_STEP = stringPreferencesKey("oobe_step")

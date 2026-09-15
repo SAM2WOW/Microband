@@ -42,14 +42,13 @@ import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 
 data class MicrobandUiState(
-    val permissions: BluetoothPermissionState = BluetoothPermissionState(false, false),
+    val permissions: BluetoothPermissionState = BluetoothPermissionState(false),
     val association: BandAssociation? = null,
     val connection: BandConnectionState = BandConnectionState.Unassociated,
     val oobeStep: BandOobeStep = BandOobeStep.Inspect,
     val protocolLogging: Boolean = false,
     val logs: List<ProtocolPacketLog> = emptyList(),
     val message: String? = null,
-    val associationInProgress: Boolean = false,
     val pairedDevices: List<PairedDeviceOption> = emptyList(),
     val setupInProgress: Boolean = false,
     val firmwarePackageStatus: String? = null,
@@ -125,40 +124,11 @@ class MicrobandViewModel(
         }
     }
 
-    fun findBand(launchChooser: (android.content.IntentSender) -> Unit) {
-        mutableState.update { it.copy(associationInProgress = true, message = null) }
-        associationManager.associate(
-            onChooser = launchChooser,
-            onAssociated = { association -> acceptAssociation(association) },
-            onFailure = { error ->
-                mutableState.update { it.copy(associationInProgress = false, message = error) }
-            },
-        )
-    }
-
-    fun onAssociationResult(success: Boolean) {
-        if (!success) {
-            mutableState.update { it.copy(associationInProgress = false, message = "Association cancelled") }
-            return
-        }
-        // Android can return RESULT_OK slightly before CompanionDeviceManager publishes
-        // the association. Retry briefly instead of leaving the welcome screen unchanged.
-        viewModelScope.launch {
-            repeat(12) {
-                if (mutableState.value.association != null) return@launch
-                associationManager.currentAssociation()?.let { association ->
-                    acceptAssociation(association)
-                    return@launch
-                }
-                delay(250)
-            }
-            mutableState.update {
-                it.copy(
-                    associationInProgress = false,
-                    message = "Android did not finish saving the Band association. Please try again.",
-                )
-            }
-        }
+    // Step 1 of pairing: hand off to Android's own Bluetooth settings so the user pairs the
+    // Band the normal classic-Bluetooth way. There is no callback for this -- the user comes
+    // back to the app manually once paired, and refresh()/refreshPairedDevices() pick it up.
+    fun openBluetoothSettings(context: Context) {
+        context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     fun refreshPairedDevices() {
@@ -180,8 +150,7 @@ class MicrobandViewModel(
             it.copy(
                 association = association,
                 connection = BandConnectionState.Disconnected,
-                associationInProgress = false,
-                message = "${runCatching { association.device.name }.getOrNull() ?: "Band"} associated",
+                message = "${runCatching { association.device.name }.getOrNull() ?: "Band"} selected",
             )
         }
     }
@@ -189,7 +158,7 @@ class MicrobandViewModel(
     fun connect() {
         val association = mutableState.value.association
         if (association == null) {
-            mutableState.update { it.copy(message = "Find your Band first") }
+            mutableState.update { it.copy(message = "Select your Band first") }
             return
         }
         connectionManager.connect(association.device)
@@ -197,12 +166,10 @@ class MicrobandViewModel(
 
     fun disconnect() = connectionManager.disconnect()
 
-    // Forgets the app's own record of the current Band (both the CDM association id and any
-    // manually picked device) so the pairing screen comes back up. Android's own Companion
-    // Device Manager association isn't deleted, so the same Band can still be picked again.
+    // Forgets which Band the app is set to use, so the pairing screen comes back up. The
+    // device stays paired at the Android level -- this only clears our own remembered pick.
     fun pairNewBand() = viewModelScope.launch {
         connectionManager.disconnect()
-        preferences.clearAssociationId()
         preferences.setManualDeviceAddress(null)
         mutableState.update {
             it.copy(

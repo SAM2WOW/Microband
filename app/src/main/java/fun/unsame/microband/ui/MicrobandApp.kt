@@ -9,12 +9,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +34,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -153,7 +156,7 @@ private enum class Destination(val label: String, val icon: ImageVector) {
 fun MicrobandApp(
     state: MicrobandUiState,
     onRequestBluetoothPermissions: () -> Unit,
-    onFindBand: () -> Unit,
+    onOpenBluetoothSettings: () -> Unit,
     onRefreshPairedDevices: () -> Unit,
     onSelectPairedDevice: (String) -> Unit,
     onConnect: () -> Unit,
@@ -191,10 +194,9 @@ fun MicrobandApp(
         Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
             WelcomeScreen(
                 permissionsGranted = state.permissions.allGranted,
-                associationInProgress = state.associationInProgress,
                 pairedDevices = state.pairedDevices,
                 onGrantPermissions = onRequestBluetoothPermissions,
-                onFindBand = onFindBand,
+                onOpenBluetoothSettings = onOpenBluetoothSettings,
                 onRefreshPairedDevices = onRefreshPairedDevices,
                 onSelectPairedDevice = onSelectPairedDevice,
                 modifier = Modifier.padding(padding),
@@ -279,10 +281,9 @@ fun MicrobandApp(
 @Composable
 private fun WelcomeScreen(
     permissionsGranted: Boolean,
-    associationInProgress: Boolean,
     pairedDevices: List<PairedDeviceOption>,
     onGrantPermissions: () -> Unit,
-    onFindBand: () -> Unit,
+    onOpenBluetoothSettings: () -> Unit,
     onRefreshPairedDevices: () -> Unit,
     onSelectPairedDevice: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -299,22 +300,22 @@ private fun WelcomeScreen(
         )
     }
     Column(
-        modifier = modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 36.dp),
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 36.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
     ) {
         Box(
-            modifier = Modifier.size(220.dp).clip(RoundedCornerShape(48.dp))
+            modifier = Modifier.size(160.dp).clip(RoundedCornerShape(40.dp))
                 .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_microband_mark),
-            contentDescription = "Microband wearable icon",
+                contentDescription = "Microband wearable icon",
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(170.dp),
+                modifier = Modifier.size(120.dp),
             )
         }
+        Spacer(Modifier.height(20.dp))
         Text("Microband", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         Text(
@@ -322,38 +323,59 @@ private fun WelcomeScreen(
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(32.dp))
-        Button(
-            onClick = if (permissionsGranted) onFindBand else onGrantPermissions,
-            enabled = !associationInProgress,
-            modifier = Modifier.fillMaxWidth().height(56.dp),
+        Spacer(Modifier.height(28.dp))
+        PairingStepCard(
+            number = 1,
+            title = "Pair your Band",
+            body = "Your Microsoft Band must be paired with your phone. After pairing, come back to this application.",
         ) {
-            Text(
-                when {
-                    associationInProgress -> "Finishing association…"
-                    permissionsGranted -> "Find my Band"
-                    else -> "Allow Bluetooth access"
-                },
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        Text(
-            if (permissionsGranted) "Android will open its secure companion-device picker."
-            else "Microband needs Nearby devices access to find and connect to your Band.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (permissionsGranted) {
-            Spacer(Modifier.height(20.dp))
-            TextButton(
-                onClick = {
-                    onRefreshPairedDevices()
-                    showPairedDevices = true
-                },
-                enabled = !associationInProgress,
-            ) {
-                Text("Choose from paired devices")
+            OutlinedButton(onClick = onOpenBluetoothSettings, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                Text("Pair my Band")
             }
+        }
+        Spacer(Modifier.height(16.dp))
+        PairingStepCard(
+            number = 2,
+            title = "Select your Band",
+            body = "Already paired? Pick it from your phone's Bluetooth devices to start using it with Microband.",
+        ) {
+            Button(
+                onClick = {
+                    if (permissionsGranted) {
+                        onRefreshPairedDevices()
+                        showPairedDevices = true
+                    } else {
+                        onGrantPermissions()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) {
+                Text(if (permissionsGranted) "Select my Band and Start" else "Allow Bluetooth access")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairingStepCard(
+    number: Int,
+    title: String,
+    body: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    modifier = Modifier.size(28.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(number.toString(), color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+                }
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+            Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            content()
         }
     }
 }
@@ -1463,7 +1485,7 @@ private fun DebugScreen(
             Card(shape = RoundedCornerShape(22.dp)) {
                 Column(Modifier.padding(vertical = 8.dp)) {
                     DebugValue("Device", device?.bluetoothName ?: "Not connected")
-                    DebugValue("Association ID", state.association?.associationId?.toString() ?: "Unavailable")
+                    DebugValue("Band address", runCatching { state.association?.device?.address }.getOrNull() ?: "Unavailable")
                     DebugValue("Transport", if (state.connection is BandConnectionState.Connected) "RFCOMM" else "Disconnected")
                     DebugValue("PCB ID", device?.pcbId?.toString() ?: "—")
                     DebugValue("Hardware", when { device == null -> "—"; device.isBand2 -> "Envoy / Band 2"; else -> "Unsupported" })
