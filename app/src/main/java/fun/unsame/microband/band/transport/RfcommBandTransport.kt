@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 
 class RfcommBandTransport(
     private val packetObserver: suspend (direction: String, bytes: ByteArray, status: String?) -> Unit,
@@ -109,14 +108,36 @@ class RfcommBandTransport(
         responseLength: Int,
         transfer: ByteArray?,
         timeoutMillis: Long,
-    ): BandRawResponse = withTimeout(timeoutMillis) {
-        write(BandPacketCodec.frame(command))
-        if (transfer != null) write(transfer)
-        val payload = if (responseLength > 0) readExact(responseLength) else byteArrayOf()
-        val statusBytes = readExact(6)
-        val status = BandPacketCodec.parseStatus(statusBytes)
-        packetObserver("STATUS", statusBytes, "facility=${status.facility}, code=${status.code}, error=${status.isError}")
-        BandRawResponse(payload, status)
+    ): BandRawResponse = withContext(Dispatchers.IO) {
+        var timedOut = false
+        coroutineScope {
+            // write()/readExact() ultimately block on the socket's plain Java streams, which have
+            // no suspension point either, so the same withTimeout{} limitation as connect() above
+            // applies here: if the Band stops responding mid-transaction, a wrapped withTimeout{}
+            // cannot interrupt the blocked read/write, and every protocol operation (time sync,
+            // health reads, notifications, firmware transfer...) could hang forever instead of
+            // failing. Closing the socket from another thread unblocks it, same as in connect().
+            val watchdog = launch {
+                delay(timeoutMillis)
+                timedOut = true
+                runCatching { socket?.close() }
+            }
+            try {
+                write(BandPacketCodec.frame(command))
+                if (transfer != null) write(transfer)
+                val payload = if (responseLength > 0) readExact(responseLength) else byteArrayOf()
+                val statusBytes = readExact(6)
+                val status = BandPacketCodec.parseStatus(statusBytes)
+                packetObserver("STATUS", statusBytes, "facility=${status.facility}, code=${status.code}, error=${status.isError}")
+                BandRawResponse(payload, status)
+            } catch (exception: BandException) {
+                throw exception
+            } catch (exception: Exception) {
+                if (timedOut) throw BandException.Timeout() else throw exception
+            } finally {
+                watchdog.cancel()
+            }
+        }
     }
 
     private companion object {
