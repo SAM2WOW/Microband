@@ -48,7 +48,10 @@ jobs:
             https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
           unzip -q "$RUNNER_TEMP/cmdline-tools.zip" -d "$SDK_ROOT/cmdline-tools"
           mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
-          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          # sdkmanager stops reading stdin once all licenses are accepted, so `yes` gets a
+          # broken pipe and exits non-zero; with pipefail that would fail this step even
+          # though license acceptance itself succeeded. The `|| true` absorbs only that.
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
