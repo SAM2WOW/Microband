@@ -24,8 +24,10 @@ android {
         applicationId = "com.unsame.microband"
         minSdk = 31
         targetSdk = 37
-        versionCode = 17
-        versionName = "0.8.1"
+        // versionCode encodes versionName as major*10000 + minor*100 + patch (0.8.2 -> 802).
+        // Kotlin doesn't allow a leading-zero literal, so write it as the plain integer.
+        versionCode = 802
+        versionName = "0.8.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
