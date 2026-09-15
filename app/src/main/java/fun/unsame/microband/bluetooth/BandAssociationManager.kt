@@ -61,6 +61,7 @@ class BandAssociationManager(
                 @androidx.annotation.RequiresApi(33)
                 override fun onAssociationCreated(associationInfo: AssociationInfo) {
                     preferences.setAssociationIdAsync(associationInfo.id)
+                    preferences.clearManualDeviceAddressAsync()
                     val address = associationInfo.deviceMacAddress?.toString()?.let(::normalizeBluetoothAddress)
                     if (address == null) {
                         onFailure("Android created the association without a Bluetooth address")
@@ -91,6 +92,10 @@ class BandAssociationManager(
     /** Adopts a bonded device the user picked by hand, bypassing the name-pattern filter. */
     suspend fun selectPairedDevice(address: String): BandAssociation? {
         val device = pairedBondedDevice(address) ?: return null
+        // Disarm any remembered CDM association id: otherwise the "any known association"
+        // fallback below in currentAssociation() would keep resurrecting the old device on
+        // the next refresh, silently ignoring this manual pick.
+        preferences.clearAssociationId()
         preferences.setManualDeviceAddress(address)
         return BandAssociation(associationId = null, device = device)
     }
@@ -103,25 +108,41 @@ class BandAssociationManager(
     suspend fun currentAssociation(): BandAssociation? {
         if (!BluetoothPermissionManager.state(context).canConnect) return null
         if (Build.VERSION.SDK_INT >= 33) {
+            // Priority: (1) the exact CDM association we last confirmed ourselves, (2) a
+            // device the user picked by hand, (3) any other CDM association this app still
+            // holds (recovery path, e.g. our own preference was lost but Android's record
+            // wasn't), (4) a bonded device whose name simply looks like a Band. Tier 3 must
+            // come after tier 2: Android never forgets a CDM association on its own, so
+            // checking it unconditionally would keep resurrecting an old Band after the user
+            // deliberately picked a different one.
             val preferredId = preferences.associationId.first()
-            val info = manager.myAssociations.firstOrNull { it.id == preferredId }
-                ?: manager.myAssociations.maxByOrNull { it.id }
-            if (info != null) {
-                val address = info.deviceMacAddress?.toString()?.let(::normalizeBluetoothAddress)
+            val exactMatch = preferredId?.let { id -> manager.myAssociations.firstOrNull { it.id == id } }
+            if (exactMatch != null) {
+                val address = exactMatch.deviceMacAddress?.toString()?.let(::normalizeBluetoothAddress)
                 if (address != null) {
-                    preferences.setAssociationId(info.id)
-                    return BandAssociation(info.id, bluetoothAdapter.getRemoteDevice(address))
+                    preferences.setAssociationId(exactMatch.id)
+                    return BandAssociation(exactMatch.id, bluetoothAdapter.getRemoteDevice(address))
                 }
             }
-            return manuallySelectedDevice() ?: pairedBand()
+            manuallySelectedDevice()?.let { return it }
+            val fallback = manager.myAssociations.maxByOrNull { it.id }
+            if (fallback != null) {
+                val address = fallback.deviceMacAddress?.toString()?.let(::normalizeBluetoothAddress)
+                if (address != null) {
+                    preferences.setAssociationId(fallback.id)
+                    return BandAssociation(fallback.id, bluetoothAdapter.getRemoteDevice(address))
+                }
+            }
+            return pairedBand()
         }
 
+        manuallySelectedDevice()?.let { return it }
         @Suppress("DEPRECND!")
         val address = manager.associations.firstOrNull()
         return if (address != null) {
             BandAssociation(null, bluetoothAdapter.getRemoteDevice(normalizeBluetoothAddress(address)))
         } else {
-            manuallySelectedDevice() ?: pairedBand()
+            pairedBand()
         }
     }
 

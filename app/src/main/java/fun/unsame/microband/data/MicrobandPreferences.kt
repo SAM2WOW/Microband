@@ -49,6 +49,10 @@ class MicrobandPreferences(private val context: Context) {
         context.dataStore.edit { it.remove(ASSOCIATION_ID) }
     }
 
+    fun clearManualDeviceAddressAsync() {
+        scope.launch { setManualDeviceAddress(null) }
+    }
+
     suspend fun setManualDeviceAddress(address: String?) {
         context.dataStore.edit { preferences ->
             if (address == null) preferences.remove(MANUAL_DEVICE_ADDRESS) else preferences[MANUAL_DEVICE_ADDRESS] = address
