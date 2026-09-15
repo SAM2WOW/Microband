@@ -196,6 +196,22 @@ class MicrobandViewModel(
     }
 
     fun disconnect() = connectionManager.disconnect()
+
+    // Forgets the app's own record of the current Band (both the CDM association id and any
+    // manually picked device) so the pairing screen comes back up. Android's own Companion
+    // Device Manager association isn't deleted, so the same Band can still be picked again.
+    fun pairNewBand() = viewModelScope.launch {
+        connectionManager.disconnect()
+        preferences.clearAssociationId()
+        preferences.setManualDeviceAddress(null)
+        mutableState.update {
+            it.copy(
+                association = null,
+                connection = BandConnectionState.Unassociated,
+                message = "Ready to pair a new Band",
+            )
+        }
+    }
     fun inspectBand() = connectionManager.inspect()
     fun finishSetup() = connectionManager.finishSetup()
     fun syncClock() = connectionManager.syncClock()

@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
                     onSelectPairedDevice = viewModel::selectPairedDevice,
                     onConnect = viewModel::connect,
                     onDisconnect = viewModel::disconnect,
+                    onPairNewBand = viewModel::pairNewBand,
                     onInspect = viewModel::inspectBand,
                     onFinishSetup = viewModel::finishSetup,
                     onSyncClock = viewModel::syncClock,

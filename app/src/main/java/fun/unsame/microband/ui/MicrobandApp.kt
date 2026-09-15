@@ -122,6 +122,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.unsame.microband.BuildConfig
 import com.unsame.microband.R
 import com.unsame.microband.band.model.BandConnectionState
 import com.unsame.microband.band.model.BandDeviceInfo
@@ -157,6 +158,7 @@ fun MicrobandApp(
     onSelectPairedDevice: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
+    onPairNewBand: () -> Unit,
     onInspect: () -> Unit,
     onFinishSetup: () -> Unit,
     onSyncClock: () -> Unit,
@@ -234,7 +236,7 @@ fun MicrobandApp(
                 }
                 AnimatedContent(targetState = destinations[selected], label = "destination", modifier = Modifier.weight(1f)) { destination ->
                     when (destination) {
-                        Destination.Home -> HomeScreen(state, onConnect, onDisconnect, onInspect, onFinishSetup, onSyncClock, onRefreshHealth)
+                        Destination.Home -> HomeScreen(state, onConnect, onDisconnect, onInspect, onFinishSetup, onSyncClock, onRefreshHealth, onPairNewBand)
                         Destination.Health -> HealthScreen(state, onRefreshHealth)
                         Destination.Personalize -> PersonalizeScreen(
                     state = state,
@@ -397,6 +399,7 @@ private fun HomeScreen(
     onFinishSetup: () -> Unit,
     onSyncClock: () -> Unit,
     onRefreshHealth: () -> Unit,
+    onPairNewBand: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val connected = state.connection as? BandConnectionState.Connected
@@ -408,7 +411,7 @@ private fun HomeScreen(
         item {
             Text("Today", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
         }
-        item { DeviceHeroCard(state.connection, onConnect, onDisconnect, onSyncClock) }
+        item { DeviceHeroCard(state.connection, onConnect, onDisconnect, onSyncClock, onPairNewBand) }
         item { HealthDashboard(state.healthSnapshot, connected != null, state.healthSyncInProgress, onRefreshHealth) }
         if (connected?.device?.oobeComplete != true) item {
             SetupCard(
@@ -693,6 +696,7 @@ private fun DeviceHeroCard(
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onSyncClock: () -> Unit,
+    onPairNewBand: () -> Unit,
 ) {
     val connected = connection as? BandConnectionState.Connected
     Card(
@@ -732,7 +736,10 @@ private fun DeviceHeroCard(
                     FilledTonalButton(onClick = onSyncClock) { Text("Sync time") }
                 }
             } else {
-                Button(onClick = onConnect, enabled = connection !is BandConnectionState.Connecting) { Text("Connect") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = onConnect, enabled = connection !is BandConnectionState.Connecting) { Text("Connect") }
+                    TextButton(onClick = onPairNewBand) { Text("Pair a new Band") }
+                }
             }
         }
     }
@@ -1305,7 +1312,7 @@ private fun SettingsScreen(
                 Text("Open Developer tools")
             }
         }
-        item { Text("Microband 0.8.0", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Microband ${BuildConfig.VERSION_NAME}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
