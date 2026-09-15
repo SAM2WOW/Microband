@@ -22,6 +22,7 @@ class MicrobandPreferences(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val associationId: Flow<Int?> = context.dataStore.data.map { it[ASSOCIATION_ID] }
+    val manualDeviceAddress: Flow<String?> = context.dataStore.data.map { it[MANUAL_DEVICE_ADDRESS] }
     val protocolLogging: Flow<Boolean> = context.dataStore.data.map { it[PROTOCOL_LOGGING] ?: false }
     val allNotificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALL_NOTIFICATIONS_ENABLED] ?: true }
     val maskNotificationsWhenLocked: Flow<Boolean> = context.dataStore.data.map { it[MASK_NOTIFICATIONS_WHEN_LOCKED] ?: true }
@@ -42,6 +43,12 @@ class MicrobandPreferences(private val context: Context) {
 
     fun setAssociationIdAsync(value: Int) {
         scope.launch { setAssociationId(value) }
+    }
+
+    suspend fun setManualDeviceAddress(address: String?) {
+        context.dataStore.edit { preferences ->
+            if (address == null) preferences.remove(MANUAL_DEVICE_ADDRESS) else preferences[MANUAL_DEVICE_ADDRESS] = address
+        }
     }
 
     suspend fun setProtocolLogging(enabled: Boolean) {
@@ -107,6 +114,7 @@ class MicrobandPreferences(private val context: Context) {
 
     companion object {
         private val ASSOCIATION_ID = intPreferencesKey("association_id")
+        private val MANUAL_DEVICE_ADDRESS = stringPreferencesKey("manual_device_address")
         private val PROTOCOL_LOGGING = booleanPreferencesKey("protocol_logging")
         private val OOBE_STEP = stringPreferencesKey("oobe_step")
         private val ALL_NOTIFICATIONS_ENABLED = booleanPreferencesKey("all_notifications_enabled")

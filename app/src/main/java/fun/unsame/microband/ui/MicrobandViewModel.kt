@@ -23,6 +23,7 @@ import com.unsame.microband.bluetooth.BandAssociationManager
 import com.unsame.microband.bluetooth.BandConnectionManager
 import com.unsame.microband.bluetooth.BluetoothPermissionManager
 import com.unsame.microband.bluetooth.BluetoothPermissionState
+import com.unsame.microband.bluetooth.PairedDeviceOption
 import com.unsame.microband.data.MicrobandPreferences
 import com.unsame.microband.data.ProtocolPacketLog
 import com.unsame.microband.data.HealthDailyEntity
@@ -49,6 +50,7 @@ data class MicrobandUiState(
     val logs: List<ProtocolPacketLog> = emptyList(),
     val message: String? = null,
     val associationInProgress: Boolean = false,
+    val pairedDevices: List<PairedDeviceOption> = emptyList(),
     val setupInProgress: Boolean = false,
     val firmwarePackageStatus: String? = null,
     val notificationAccessGranted: Boolean = false,
@@ -156,6 +158,19 @@ class MicrobandViewModel(
                     message = "Android did not finish saving the Band association. Please try again.",
                 )
             }
+        }
+    }
+
+    fun refreshPairedDevices() {
+        mutableState.update { it.copy(pairedDevices = associationManager.pairedDeviceOptions()) }
+    }
+
+    fun selectPairedDevice(address: String) = viewModelScope.launch {
+        val association = associationManager.selectPairedDevice(address)
+        if (association != null) {
+            acceptAssociation(association)
+        } else {
+            mutableState.update { it.copy(message = "That device is no longer paired") }
         }
     }
 

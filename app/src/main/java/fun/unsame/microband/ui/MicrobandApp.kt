@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -56,6 +57,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Watch
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Settings
@@ -129,6 +131,7 @@ import com.unsame.microband.band.model.BandSleepSummary
 import com.unsame.microband.band.model.BandTileInfo
 import com.unsame.microband.band.model.FirmwareUpdateStage
 import com.unsame.microband.band.oobe.BandOobeStep
+import com.unsame.microband.bluetooth.PairedDeviceOption
 import com.unsame.microband.data.ProtocolPacketLog
 import com.unsame.microband.data.HealthDailyEntity
 import com.unsame.microband.notification.NotificationAppInfo
@@ -150,6 +153,8 @@ fun MicrobandApp(
     state: MicrobandUiState,
     onRequestBluetoothPermissions: () -> Unit,
     onFindBand: () -> Unit,
+    onRefreshPairedDevices: () -> Unit,
+    onSelectPairedDevice: (String) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onInspect: () -> Unit,
@@ -185,8 +190,11 @@ fun MicrobandApp(
             WelcomeScreen(
                 permissionsGranted = state.permissions.allGranted,
                 associationInProgress = state.associationInProgress,
+                pairedDevices = state.pairedDevices,
                 onGrantPermissions = onRequestBluetoothPermissions,
                 onFindBand = onFindBand,
+                onRefreshPairedDevices = onRefreshPairedDevices,
+                onSelectPairedDevice = onSelectPairedDevice,
                 modifier = Modifier.padding(padding),
             )
         }
@@ -270,10 +278,24 @@ fun MicrobandApp(
 private fun WelcomeScreen(
     permissionsGranted: Boolean,
     associationInProgress: Boolean,
+    pairedDevices: List<PairedDeviceOption>,
     onGrantPermissions: () -> Unit,
     onFindBand: () -> Unit,
+    onRefreshPairedDevices: () -> Unit,
+    onSelectPairedDevice: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showPairedDevices by rememberSaveable { mutableStateOf(false) }
+    if (showPairedDevices) {
+        PairedDevicePickerDialog(
+            devices = pairedDevices,
+            onSelect = { address ->
+                showPairedDevices = false
+                onSelectPairedDevice(address)
+            },
+            onDismiss = { showPairedDevices = false },
+        )
+    }
     Column(
         modifier = modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 36.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -319,7 +341,51 @@ private fun WelcomeScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (permissionsGranted) {
+            Spacer(Modifier.height(20.dp))
+            TextButton(
+                onClick = {
+                    onRefreshPairedDevices()
+                    showPairedDevices = true
+                },
+                enabled = !associationInProgress,
+            ) {
+                Text("Choose from paired devices")
+            }
+        }
     }
+}
+
+@Composable
+private fun PairedDevicePickerDialog(
+    devices: List<PairedDeviceOption>,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Paired Bluetooth devices") },
+        text = {
+            if (devices.isEmpty()) {
+                Text("No paired Bluetooth devices found. Pair your Band in Android's Bluetooth settings first, then try again.")
+            } else {
+                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                    items(devices) { device ->
+                        ListItem(
+                            headlineContent = { Text(device.name) },
+                            supportingContent = { Text(device.address) },
+                            trailingContent = {
+                                if (device.looksLikeBand) Icon(Icons.Rounded.Watch, contentDescription = "Looks like a Band")
+                            },
+                            modifier = Modifier.clickable { onSelect(device.address) },
+                        )
+                        HorizontalDivider()
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

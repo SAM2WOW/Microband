@@ -48,7 +48,7 @@ Microsoft Band 1 is not currently supported.
 ## Features
 
 - Finds new and already-paired devices named `MSFT Band 2 xx:xx`.
-- Associates through Android's secure Companion Device Manager.
+- Associates through Android's secure Companion Device Manager, or lets you pick any already-paired Bluetooth device by hand if your Band's name doesn't match.
 - Uses the public SDP-based RFCOMM API—no root access or hidden Bluetooth APIs.
 - Inspects PCB, firmware, application, setup, and clock state.
 - Safely resumes and completes first-run Band 2 setup.

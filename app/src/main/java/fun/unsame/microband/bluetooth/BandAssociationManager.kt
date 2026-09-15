@@ -20,6 +20,12 @@ data class BandAssociation(
     val device: BluetoothDevice,
 )
 
+data class PairedDeviceOption(
+    val address: String,
+    val name: String,
+    val looksLikeBand: Boolean,
+)
+
 class BandAssociationManager(
     private val context: Context,
     private val preferences: MicrobandPreferences,
@@ -72,6 +78,27 @@ class BandAssociationManager(
         )
     }
 
+    /** All of the phone's currently bonded Bluetooth devices, for manual pairing when a Band's
+     * name does not match the expected pattern. Devices that look like a Band are listed first. */
+    @SuppressLint("MissingPermission")
+    fun pairedDeviceOptions(): List<PairedDeviceOption> {
+        if (!BluetoothPermissionManager.state(context).canConnect) return emptyList()
+        return bluetoothAdapter.bondedDevices.orEmpty()
+            .map { PairedDeviceOption(normalizeBluetoothAddress(it.address), it.name ?: it.address, isBandName(it.name)) }
+            .sortedWith(compareByDescending<PairedDeviceOption> { it.looksLikeBand }.thenBy { it.name })
+    }
+
+    /** Adopts a bonded device the user picked by hand, bypassing the name-pattern filter. */
+    suspend fun selectPairedDevice(address: String): BandAssociation? {
+        val device = pairedBondedDevice(address) ?: return null
+        preferences.setManualDeviceAddress(address)
+        return BandAssociation(associationId = null, device = device)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun pairedBondedDevice(address: String): BluetoothDevice? =
+        bluetoothAdapter.bondedDevices.orEmpty().firstOrNull { normalizeBluetoothAddress(it.address) == address }
+
     @SuppressLint("MissingPermission")
     suspend fun currentAssociation(): BandAssociation? {
         if (!BluetoothPermissionManager.state(context).canConnect) return null
@@ -86,7 +113,7 @@ class BandAssociationManager(
                     return BandAssociation(info.id, bluetoothAdapter.getRemoteDevice(address))
                 }
             }
-            return pairedBand()
+            return manuallySelectedDevice() ?: pairedBand()
         }
 
         @Suppress("DEPRECND!")
@@ -94,8 +121,13 @@ class BandAssociationManager(
         return if (address != null) {
             BandAssociation(null, bluetoothAdapter.getRemoteDevice(normalizeBluetoothAddress(address)))
         } else {
-            pairedBand()
+            manuallySelectedDevice() ?: pairedBand()
         }
+    }
+
+    private suspend fun manuallySelectedDevice(): BandAssociation? {
+        val address = preferences.manualDeviceAddress.first() ?: return null
+        return pairedBondedDevice(address)?.let { BandAssociation(associationId = null, device = it) }
     }
 
     @SuppressLint("MissingPermission")

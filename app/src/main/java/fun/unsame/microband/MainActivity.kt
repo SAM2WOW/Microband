@@ -65,6 +65,8 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     onFindBand = { viewModel.findBand(launchAssociation) },
+                    onRefreshPairedDevices = viewModel::refreshPairedDevices,
+                    onSelectPairedDevice = viewModel::selectPairedDevice,
                     onConnect = viewModel::connect,
                     onDisconnect = viewModel::disconnect,
                     onInspect = viewModel::inspectBand,
