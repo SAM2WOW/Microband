@@ -13,9 +13,12 @@ import com.unsame.microband.band.protocol.readExactBlocking
 import java.io.InputStream
 import java.io.OutputStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
@@ -33,19 +36,44 @@ class RfcommBandTransport(
     override suspend fun connect(device: BluetoothDevice) = withContext(Dispatchers.IO) {
         disconnect()
         mutableState.value = BandConnectionState.Connecting
+        var pendingSocket: BluetoothSocket? = null
+        var timedOut = false
         try {
             val newSocket = device.createRfcommSocketToServiceRecord(BandConstants.RFCOMM_SERVICE_UUID)
-            withTimeout(15_000) { newSocket.connect() }
+            pendingSocket = newSocket
+            coroutineScope {
+                // BluetoothSocket.connect() is a plain blocking call with no suspension point,
+                // so wrapping it in withTimeout{} cannot actually interrupt it: if the remote
+                // device never answers (e.g. it isn't really listening on this RFCOMM service,
+                // which is easy to hit now that any bonded device can be picked by hand), the
+                // call can block forever. The documented way to force it to unblock is to close
+                // the socket from another thread, which makes connect() throw immediately.
+                val watchdog = launch {
+                    delay(CONNECT_TIMEOUT_MILLIS)
+                    timedOut = true
+                    runCatching { newSocket.close() }
+                }
+                try {
+                    newSocket.connect()
+                } finally {
+                    watchdog.cancel()
+                }
+            }
             socket = newSocket
             input = newSocket.inputStream
             output = newSocket.outputStream
             mutableState.value = BandConnectionState.Connected(BandDeviceInfo(device.name ?: "Microsoft Band"))
         } catch (exception: Exception) {
-            runCatching { socket?.close() }
+            runCatching { pendingSocket?.close() }
             socket = null
             input = null
             output = null
-            mutableState.value = BandConnectionState.Error("Unable to connect")
+            val message = if (timedOut) {
+                "This device did not respond. Make sure you picked your actual Band."
+            } else {
+                "Unable to connect"
+            }
+            mutableState.value = BandConnectionState.Error(message)
             throw BandException.ConnectionFailed(exception)
         }
     }
@@ -89,5 +117,9 @@ class RfcommBandTransport(
         val status = BandPacketCodec.parseStatus(statusBytes)
         packetObserver("STATUS", statusBytes, "facility=${status.facility}, code=${status.code}, error=${status.isError}")
         BandRawResponse(payload, status)
+    }
+
+    private companion object {
+        const val CONNECT_TIMEOUT_MILLIS = 15_000L
     }
 }
