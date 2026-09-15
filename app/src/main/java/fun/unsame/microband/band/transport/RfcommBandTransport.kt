@@ -3,6 +3,7 @@ package com.unsame.microband.band.transport
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
+import android.util.Log
 import com.unsame.microband.band.model.BandConnectionState
 import com.unsame.microband.band.model.BandDeviceInfo
 import com.unsame.microband.band.model.BandException
@@ -33,13 +34,16 @@ class RfcommBandTransport(
 
     @SuppressLint("MissingPermission")
     override suspend fun connect(device: BluetoothDevice) = withContext(Dispatchers.IO) {
+        Log.d(TAG, "connect: disconnecting any previous socket")
         disconnect()
         mutableState.value = BandConnectionState.Connecting
         var pendingSocket: BluetoothSocket? = null
         var timedOut = false
         try {
+            Log.d(TAG, "connect: createRfcommSocketToServiceRecord(${BandConstants.RFCOMM_SERVICE_UUID}) for ${device.address} bondState=${device.bondState}")
             val newSocket = device.createRfcommSocketToServiceRecord(BandConstants.RFCOMM_SERVICE_UUID)
             pendingSocket = newSocket
+            val connectStart = System.currentTimeMillis()
             coroutineScope {
                 // BluetoothSocket.connect() is a plain blocking call with no suspension point,
                 // so wrapping it in withTimeout{} cannot actually interrupt it: if the remote
@@ -50,10 +54,13 @@ class RfcommBandTransport(
                 val watchdog = launch {
                     delay(CONNECT_TIMEOUT_MILLIS)
                     timedOut = true
+                    Log.w(TAG, "connect: watchdog firing after ${CONNECT_TIMEOUT_MILLIS}ms, forcing socket closed")
                     runCatching { newSocket.close() }
                 }
                 try {
+                    Log.d(TAG, "connect: calling BluetoothSocket.connect() (blocking)")
                     newSocket.connect()
+                    Log.d(TAG, "connect: BluetoothSocket.connect() returned after ${System.currentTimeMillis() - connectStart}ms")
                 } finally {
                     watchdog.cancel()
                 }
@@ -61,8 +68,10 @@ class RfcommBandTransport(
             socket = newSocket
             input = newSocket.inputStream
             output = newSocket.outputStream
+            Log.d(TAG, "connect: socket established, streams open")
             mutableState.value = BandConnectionState.Connected(BandDeviceInfo(device.name ?: "Microsoft Band"))
         } catch (exception: Exception) {
+            Log.e(TAG, "connect: failed (timedOut=$timedOut)", exception)
             runCatching { pendingSocket?.close() }
             socket = null
             input = null
@@ -110,6 +119,8 @@ class RfcommBandTransport(
         timeoutMillis: Long,
     ): BandRawResponse = withContext(Dispatchers.IO) {
         var timedOut = false
+        val transactStart = System.currentTimeMillis()
+        Log.v(TAG, "transact: facility=0x${command.getOrNull(3)?.let { "%02X".format(it) }} code=0x${command.getOrNull(2)?.let { "%02X".format(it) }} responseLength=$responseLength transferSize=${transfer?.size ?: 0}")
         coroutineScope {
             // write()/readExact() ultimately block on the socket's plain Java streams, which have
             // no suspension point either, so the same withTimeout{} limitation as connect() above
@@ -129,10 +140,13 @@ class RfcommBandTransport(
                 val statusBytes = readExact(6)
                 val status = BandPacketCodec.parseStatus(statusBytes)
                 packetObserver("STATUS", statusBytes, "facility=${status.facility}, code=${status.code}, error=${status.isError}")
+                Log.v(TAG, "transact: completed in ${System.currentTimeMillis() - transactStart}ms, status=${status}")
                 BandRawResponse(payload, status)
             } catch (exception: BandException) {
+                Log.w(TAG, "transact: failed after ${System.currentTimeMillis() - transactStart}ms (timedOut=$timedOut)", exception)
                 throw exception
             } catch (exception: Exception) {
+                Log.w(TAG, "transact: failed after ${System.currentTimeMillis() - transactStart}ms (timedOut=$timedOut)", exception)
                 if (timedOut) throw BandException.Timeout() else throw exception
             } finally {
                 watchdog.cancel()
@@ -141,6 +155,7 @@ class RfcommBandTransport(
     }
 
     private companion object {
+        const val TAG = "MicrobandConnect"
         const val CONNECT_TIMEOUT_MILLIS = 15_000L
     }
 }

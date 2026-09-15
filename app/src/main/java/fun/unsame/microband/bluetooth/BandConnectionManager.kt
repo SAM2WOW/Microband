@@ -148,33 +148,55 @@ class BandConnectionManager(
 
     @android.annotation.SuppressLint("MissingPermission")
     fun connect(device: BluetoothDevice) = scope.launch {
+        Log.d(CONNECT_TAG, "connect() called for ${device.address}, name=${runCatching { device.name }.getOrNull()}, bondState=${device.bondState}")
         keepConnected = true
         val newlyConnected = connectionMutex.withLock {
+            Log.d(CONNECT_TAG, "acquired connectionMutex")
             activeDevice = device
-            if (mutableState.value is BandConnectionState.Connected && runCatching { protocol.getUtcTime() }.isSuccess) return@withLock false
+            if (mutableState.value is BandConnectionState.Connected && runCatching { protocol.getUtcTime() }.isSuccess) {
+                Log.d(CONNECT_TAG, "already connected and live; skipping reconnect")
+                return@withLock false
+            }
             runCatching { connectLocked(device) }.fold(
-                onSuccess = { true },
-                onFailure = { mutableState.value = BandConnectionState.Error(it.userMessage()); false },
+                onSuccess = {
+                    Log.d(CONNECT_TAG, "connectLocked() succeeded")
+                    true
+                },
+                onFailure = {
+                    Log.e(CONNECT_TAG, "connectLocked() failed", it)
+                    mutableState.value = BandConnectionState.Error(it.userMessage())
+                    false
+                },
             )
         }
+        Log.d(CONNECT_TAG, "connect() finished, newlyConnected=$newlyConnected")
         if (newlyConnected) syncAfterConnect()
     }
 
     @android.annotation.SuppressLint("MissingPermission")
     private suspend fun connectLocked(device: BluetoothDevice) {
         mutableState.value = BandConnectionState.Connecting
+        Log.d(CONNECT_TAG, "connectLocked: ensuring bond (current bondState=${device.bondState})")
         ensureBonded(device)
+        Log.d(CONNECT_TAG, "connectLocked: bonded, opening RFCOMM transport")
+        val transportStart = System.currentTimeMillis()
         transport.connect(device)
+        Log.d(CONNECT_TAG, "connectLocked: transport.connect() returned after ${System.currentTimeMillis() - transportStart}ms")
         val name = runCatching { device.name }.getOrNull() ?: "Microsoft Band"
         mutableState.value = BandConnectionState.Connected(BandDeviceInfo(name))
         startPushService(device)
         // The official SDK negotiates protocol version before requesting sensors.
         // Older firmware may reject this command, so a failed negotiation must not
         // prevent basic time/notification operations.
+        Log.d(CONNECT_TAG, "connectLocked: sending SDK compatibility handshake")
         runCatching { protocol.checkSdkCompatibility() }
+            .onFailure { Log.w(CONNECT_TAG, "checkSdkCompatibility() failed (non-fatal)", it) }
         try {
+            Log.d(CONNECT_TAG, "connectLocked: inspecting Band")
             inspectConnectedBand(name)
+            Log.d(CONNECT_TAG, "connectLocked: inspection succeeded")
         } catch (exception: Exception) {
+            Log.w(CONNECT_TAG, "connectLocked: inspection failed (non-fatal)", exception)
             mutableEvents.emit("Connected. Device checks will retry automatically: ${exception.userMessage()}")
         }
     }
@@ -219,9 +241,13 @@ class BandConnectionManager(
 
     @android.annotation.SuppressLint("MissingPermission")
     private suspend fun ensureBonded(device: BluetoothDevice) {
-        if (device.bondState == BluetoothDevice.BOND_BONDED) return
+        if (device.bondState == BluetoothDevice.BOND_BONDED) {
+            Log.d(CONNECT_TAG, "ensureBonded: already bonded")
+            return
+        }
 
         val started = device.bondState == BluetoothDevice.BOND_BONDING || device.createBond()
+        Log.d(CONNECT_TAG, "ensureBonded: createBond() started=$started, bondState=${device.bondState}")
         if (!started) throw BandException.PairingFailed("Android could not start Band pairing")
 
         try {
@@ -792,6 +818,7 @@ class BandConnectionManager(
     }
 
     companion object {
+        private const val CONNECT_TAG = "MicrobandConnect"
         const val LATEST_FIRMWARE_VERSION = "2.0.5202.0"
         private const val LATEST_FIRMWARE_SIZE = 1_838_103L
         private const val LATEST_FIRMWARE_SHA256 = "2473896B8281B2FF81E462374A48BE8A3E8901FB6B2C55AF0FE9125930A60727"

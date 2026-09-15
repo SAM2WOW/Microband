@@ -85,7 +85,7 @@ class BandAssociationManager(
     fun pairedDeviceOptions(): List<PairedDeviceOption> {
         if (!BluetoothPermissionManager.state(context).canConnect) return emptyList()
         return bluetoothAdapter.bondedDevices.orEmpty()
-            .map { PairedDeviceOption(normalizeBluetoothAddress(it.address), it.name ?: it.address, isBandName(it.name)) }
+            .map { PairedDeviceOption(identityAddress(it), it.name ?: it.address, isBandName(it.name)) }
             .sortedWith(compareByDescending<PairedDeviceOption> { it.looksLikeBand }.thenBy { it.name })
     }
 
@@ -96,13 +96,36 @@ class BandAssociationManager(
         // fallback below in currentAssociation() would keep resurrecting the old device on
         // the next refresh, silently ignoring this manual pick.
         preferences.clearAssociationId()
-        preferences.setManualDeviceAddress(address)
+        // Persist the stable identity address, not whatever address this bond happens to be
+        // listed under right now. The Band is a dual-mode device: Android enumerates its LE
+        // bond under a resolvable private address that can rotate over time, while the RFCOMM
+        // connection it actually needs always resolves to the fixed classic identity address
+        // underneath. Storing the rotating address would silently orphan this pick once Android
+        // rotates it: pairedBondedDevice() would no longer find a match on the next launch.
+        preferences.setManualDeviceAddress(identityAddress(device))
         return BandAssociation(associationId = null, device = device)
     }
 
+    /** Matches a bonded device by its stable identity address, not the address it happens to be
+     * enumerated under right now -- see the comment in [selectPairedDevice]. */
     @SuppressLint("MissingPermission")
     private fun pairedBondedDevice(address: String): BluetoothDevice? =
-        bluetoothAdapter.bondedDevices.orEmpty().firstOrNull { normalizeBluetoothAddress(it.address) == address }
+        bluetoothAdapter.bondedDevices.orEmpty().firstOrNull { identityAddress(it) == address }
+
+    /** The Bluetooth identity address for [device]: the fixed address behind a possibly-rotating
+     * LE private address, available from Android 14 (API 34) onward via
+     * [BluetoothDevice.getIdentityAddressWithType]. Falls back to the device's
+     * currently-enumerated address when the identity address isn't available -- classic-only
+     * devices, no permission, or an older platform -- which matches the previous behavior. */
+    @SuppressLint("MissingPermission")
+    private fun identityAddress(device: BluetoothDevice): String {
+        if (Build.VERSION.SDK_INT >= 34) {
+            runCatching { device.identityAddressWithType?.address }.getOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { return normalizeBluetoothAddress(it) }
+        }
+        return normalizeBluetoothAddress(device.address)
+    }
 
     @SuppressLint("MissingPermission")
     suspend fun currentAssociation(): BandAssociation? {
