@@ -37,6 +37,9 @@ enum class NotificationCategory(val preferenceKey: String, val label: String) {
 }
 
 object NotificationClassifier {
+    fun isMediaPlayback(androidCategory: String?, hasMediaSession: Boolean): Boolean =
+        androidCategory == "transport" || hasMediaSession
+
     fun classify(packageName: String, sourceLabel: String, androidCategory: String?): NotificationCategory {
         val packageLower = packageName.lowercase()
         val labelLower = sourceLabel.lowercase()

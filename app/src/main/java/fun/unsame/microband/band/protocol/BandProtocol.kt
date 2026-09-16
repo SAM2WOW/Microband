@@ -20,10 +20,18 @@ import java.io.File
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 
 class BandProtocol(private val transport: BandTransport) {
     private val mutex = Mutex()
     private val firmwareUiMutex = Mutex()
+    private val sensorPayloads = Channel<ByteArray>(capacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    fun offerSensorPayload(payload: ByteArray) {
+        sensorPayloads.trySend(payload)
+    }
 
     suspend fun checkSdkCompatibility() = write(
         facility = BandConstants.FACILITY_JUTIL,
@@ -381,6 +389,7 @@ class BandProtocol(private val transport: BandTransport) {
     }
 
     private suspend fun readDailyMetric(type: Int): BandDailyMetrics? {
+        while (sensorPayloads.tryReceive().isSuccess) Unit
         write(
             facility = BandConstants.FACILITY_REMOTE_SUBSCRIPTION,
             code = 0,
@@ -389,14 +398,20 @@ class BandProtocol(private val transport: BandTransport) {
         )
         try {
             repeat(5) {
+                withTimeoutOrNull(1_000) { sensorPayloads.receive() }?.let { payload ->
+                    if (BandHealthCodec.containsSampleType(payload, type)) {
+                        BandHealthCodec.dailyMetrics(payload).takeIf { it.hasData }?.let { return it }
+                    }
+                }
                 delay(300)
                 val length = BandPacketCodec.readInt(
                     read(BandConstants.FACILITY_REMOTE_SUBSCRIPTION, 2, 4),
                 )
                 if (length in 1..4_096) {
-                    return BandHealthCodec.dailyMetrics(
-                        read(BandConstants.FACILITY_REMOTE_SUBSCRIPTION, 3, length),
-                    ).takeIf { it.hasData }
+                    val payload = read(BandConstants.FACILITY_REMOTE_SUBSCRIPTION, 3, length)
+                    if (BandHealthCodec.containsSampleType(payload, type)) {
+                        return BandHealthCodec.dailyMetrics(payload).takeIf { it.hasData }
+                    }
                 }
             }
             return null

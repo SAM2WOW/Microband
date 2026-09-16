@@ -25,6 +25,7 @@ import com.unsame.microband.data.ProtocolPacketLog
 import com.unsame.microband.data.toEntity
 import com.unsame.microband.data.toModel
 import com.unsame.microband.band.model.BandHealthSnapshot
+import com.unsame.microband.band.model.BandDailyMetrics
 import com.unsame.microband.band.model.BandFirmwareIdentity
 import com.unsame.microband.band.model.FirmwareUpdateStage
 import com.unsame.microband.band.model.FirmwareUpdateStatus
@@ -134,6 +135,7 @@ class BandConnectionManager(
     private var pushJob: Job? = null
     private var voiceAudio = java.io.ByteArrayOutputStream()
     private var voiceIsDictation = false
+    @Volatile private var lastAutomaticHealthSyncAt = 0L
 
     init {
         scope.launch {
@@ -141,6 +143,12 @@ class BandConnectionManager(
                 delay(30_000)
                 if (keepConnected && activeDevice != null) {
                     runCatching { ensureLiveConnection() }
+                    val now = System.currentTimeMillis()
+                    if (!mutableHealthSyncInProgress.value && now - lastAutomaticHealthSyncAt >= HEALTH_SYNC_INTERVAL_MILLIS) {
+                        lastAutomaticHealthSyncAt = now
+                        runCatching { refreshHealthInternal() }
+                            .onFailure { Log.d("MicrobandHealth", "Automatic sync unavailable: ${it.javaClass.simpleName}") }
+                    }
                 }
             }
         }
@@ -180,14 +188,15 @@ class BandConnectionManager(
     }
 
     private suspend fun syncAfterConnect() {
-        val info = inspectedInfo ?: return
-        if (info.oobeComplete != true) return
-        runCatching { syncClockInternal(info) }
+        val info = inspectedInfo
+        if (info?.oobeComplete == false) return
+        if (info != null) runCatching { syncClockInternal(info) }
         mutableHealthSyncInProgress.value = true
         try {
             runCatching { refreshHealthInternal() }
                 .onFailure { mutableEvents.emit("Connected, but health sync failed: ${it.userMessage()}") }
         } finally {
+            lastAutomaticHealthSyncAt = System.currentTimeMillis()
             mutableHealthSyncInProgress.value = false
         }
     }
@@ -545,29 +554,40 @@ class BandConnectionManager(
     private suspend fun refreshHealthInternal() {
         val fresh = withReconnect { protocol.getHealthSnapshot() }
         val cached = healthSnapshot.value
-        val sameDay = cached?.syncedAt?.atZone(ZoneId.systemDefault())?.toLocalDate() ==
-            fresh.syncedAt.atZone(ZoneId.systemDefault()).toLocalDate()
+        val zone = ZoneId.systemDefault()
+        val cachedDate = cached?.syncedAt?.atZone(zone)?.toLocalDate()
+        val freshDate = fresh.syncedAt.atZone(zone).toLocalDate()
+        val sameDay = cachedDate == freshDate
         val merged = fresh.copy(
             stepsToday = fresh.stepsToday ?: cached?.stepsToday?.takeIf { sameDay },
             lastRun = fresh.lastRun ?: cached?.lastRun,
             lastWorkout = fresh.lastWorkout ?: cached?.lastWorkout,
             lastSleep = fresh.lastSleep ?: cached?.lastSleep,
         )
+        if (!sameDay && cachedDate != null) {
+            cached.daily?.takeIf { it.hasData && !it.cumulativeSinceReset }?.let { daily ->
+                saveDailyMetrics(cachedDate, cached.syncedAt, daily)
+            }
+        }
         healthSnapshotDao.upsert(merged.toEntity())
         fresh.daily?.takeIf { it.hasData && !it.cumulativeSinceReset }?.let { daily ->
-            healthDailyDao.upsert(
-                HealthDailyEntity(
-                    localDate = LocalDate.now().toString(),
-                    syncedAt = fresh.syncedAt.toEpochMilli(),
-                    steps = daily.steps,
-                    calories = daily.calories,
-                    distanceCentimeters = daily.distanceCentimeters,
-                    flightsAscended = daily.flightsAscended,
-                    elevationGainCentimeters = daily.elevationGainCentimeters,
-                    uvExposure = daily.uvExposure,
-                ),
-            )
+            saveDailyMetrics(freshDate, fresh.syncedAt, daily)
         }
+    }
+
+    private suspend fun saveDailyMetrics(date: LocalDate, syncedAt: Instant, daily: BandDailyMetrics) {
+        healthDailyDao.upsert(
+            HealthDailyEntity(
+                localDate = date.toString(),
+                syncedAt = syncedAt.toEpochMilli(),
+                steps = daily.steps,
+                calories = daily.calories,
+                distanceCentimeters = daily.distanceCentimeters,
+                flightsAscended = daily.flightsAscended,
+                elevationGainCentimeters = daily.elevationGainCentimeters,
+                uvExposure = daily.uvExposure,
+            ),
+        )
     }
 
     fun forwardNotification(
@@ -728,6 +748,7 @@ class BandConnectionManager(
     private suspend fun handlePushPacket(packet: BandPushPacket) {
         Log.d("MicrobandPush", "Received Band push type=${packet.type}, length=${packet.payload.size}")
         when (packet.type) {
+            PUSH_SENSOR -> protocol.offerSensorPayload(packet.payload)
             PUSH_SMS_REPLY -> handleBandReply(packet.payload)
             PUSH_KEYBOARD -> handleKeyboardEvent(packet.payload)
             PUSH_VOICE_BEGIN -> {
@@ -799,6 +820,7 @@ class BandConnectionManager(
         private val SENSITIVE_TRANSFER_COMMANDS = setOf(0xCC05, 0xC311)
         private val SENSITIVE_RESPONSE_COMMANDS = setOf(0x8F83, 0xCE82, 0xCE83, 0xCE84)
         private const val PUSH_SMS_REPLY = 100
+        private const val PUSH_SENSOR = 1
         private const val PUSH_VOICE_BEGIN = 200
         private const val PUSH_VOICE_DATA = 201
         private const val PUSH_VOICE_END = 202
@@ -809,5 +831,6 @@ class BandConnectionManager(
         private const val CORTANA_NON_FINAL = 5
         private const val CORTANA_TEXT_DICTATION = 8
         private const val MAX_VOICE_BYTES = 2 * 1024 * 1024
+        private const val HEALTH_SYNC_INTERVAL_MILLIS = 15 * 60 * 1000L
     }
 }

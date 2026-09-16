@@ -22,6 +22,18 @@ object BandHealthCodec {
         return dailyMetrics(subscriptionPayload).steps
     }
 
+    fun containsSampleType(subscriptionPayload: ByteArray, expectedType: Int): Boolean {
+        var offset = 0
+        while (offset + 4 <= subscriptionPayload.size) {
+            val type = subscriptionPayload[offset].toInt() and 0xFF
+            val sampleSize = BandPacketCodec.readShort(subscriptionPayload, offset + 2)
+            if (sampleSize < 0 || offset + 4 + sampleSize > subscriptionPayload.size) return false
+            if (type == expectedType) return true
+            offset += 4 + sampleSize
+        }
+        return false
+    }
+
     fun dailyMetrics(subscriptionPayload: ByteArray): BandDailyMetrics {
         var offset = 0
         var metrics = BandDailyMetrics()

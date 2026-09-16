@@ -40,6 +40,11 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
     override fun onNotificationPosted(notification: StatusBarNotification?) {
         val posted = notification ?: return
         if (posted.packageName == packageName || posted.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+        if (NotificationClassifier.isMediaPlayback(
+                posted.notification.category,
+                posted.notification.extras.containsKey(Notification.EXTRA_MEDIA_SESSION),
+            )
+        ) return
         val normalized = normalize(posted)
         posted.notification.actions.orEmpty().firstOrNull { action ->
             !action.remoteInputs.isNullOrEmpty() && action.actionIntent != null

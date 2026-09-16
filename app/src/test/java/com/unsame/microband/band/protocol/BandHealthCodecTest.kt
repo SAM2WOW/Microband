@@ -4,6 +4,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BandHealthCodecTest {
@@ -18,6 +20,8 @@ class BandHealthCodecTest {
             .array()
 
         assertEquals(7_890L, BandHealthCodec.dailySteps(payload))
+        assertTrue(BandHealthCodec.containsSampleType(payload, BandHealthCodec.PEDOMETER_WITH_DAILY_VALUES))
+        assertFalse(BandHealthCodec.containsSampleType(payload, BandHealthCodec.CALORIES_WITH_DAILY_VALUES))
     }
 
     @Test

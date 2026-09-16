@@ -1,6 +1,8 @@
 package com.unsame.microband.notification
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NotificationClassifierTest {
@@ -12,5 +14,12 @@ class NotificationClassifierTest {
         assertEquals(NotificationCategory.GMAIL, NotificationClassifier.classify("com.google.android.gm", "Gmail", "email"))
         assertEquals(NotificationCategory.CALENDAR, NotificationClassifier.classify("com.google.android.calendar", "Calendar", "event"))
         assertEquals(NotificationCategory.OTHER, NotificationClassifier.classify("example.app", "Example", null))
+    }
+
+    @Test
+    fun filtersMediaPlaybackEvenWhenNotificationIsNotOngoing() {
+        assertTrue(NotificationClassifier.isMediaPlayback("transport", false))
+        assertTrue(NotificationClassifier.isMediaPlayback(null, true))
+        assertFalse(NotificationClassifier.isMediaPlayback("msg", false))
     }
 }
