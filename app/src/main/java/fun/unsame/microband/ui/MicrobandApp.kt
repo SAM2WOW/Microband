@@ -75,6 +75,8 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Call
@@ -131,6 +133,9 @@ import com.unsame.microband.band.model.FirmwareUpdateStage
 import com.unsame.microband.band.oobe.BandOobeStep
 import com.unsame.microband.data.ProtocolPacketLog
 import com.unsame.microband.data.HealthDailyEntity
+import com.unsame.microband.data.runSummary
+import com.unsame.microband.data.sleepSummary
+import com.unsame.microband.data.workoutSummary
 import com.unsame.microband.notification.NotificationAppInfo
 import androidx.core.graphics.drawable.toBitmap
 import java.time.LocalDate
@@ -415,31 +420,68 @@ private fun HealthScreen(state: MicrobandUiState, onRefresh: () -> Unit, modifie
     }
     val selectedDay = state.healthHistory.firstOrNull { it.localDate == selectedDate }
     val connected = state.connection is BandConnectionState.Connected
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item {
-            Text("Health", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HealthRange.entries.forEach { option ->
-                    if (range == option) Button({ rangeOrdinal = option.ordinal }, Modifier.weight(1f)) { Text(option.label) }
-                    else FilledTonalButton({ rangeOrdinal = option.ordinal }, Modifier.weight(1f)) { Text(option.label) }
+    val selectedLocalDate = runCatching { LocalDate.parse(selectedDate) }.getOrDefault(LocalDate.now())
+    Column(modifier.fillMaxSize()) {
+        DayNavigator(
+            date = selectedLocalDate,
+            onPrevious = { selectedDate = selectedLocalDate.minusDays(1).toString() },
+            onNext = { selectedDate = selectedLocalDate.plusDays(1).coerceAtMost(LocalDate.now()).toString() },
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+        )
+        LazyColumn(Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item {
+                Text("Health", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+            }
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HealthRange.entries.forEach { option ->
+                        if (range == option) Button({ rangeOrdinal = option.ordinal }, Modifier.weight(1f)) { Text(option.label) }
+                        else FilledTonalButton({ rangeOrdinal = option.ordinal }, Modifier.weight(1f)) { Text(option.label) }
+                    }
                 }
             }
-        }
-        item { StepsChart(history, range, selectedDate) { selectedDate = it } }
-        item { DailyHealthCard(selectedDate, selectedDay) }
-        item {
-            Button(onClick = onRefresh, enabled = connected && !state.healthSyncInProgress, modifier = Modifier.fillMaxWidth()) {
-                Text(if (state.healthSyncInProgress) "Syncing…" else "Sync Band data")
+            item { StepsChart(history, range, selectedDate) { selectedDate = it } }
+            item { DailyHealthCard(selectedDate, selectedDay) }
+            item {
+                Button(onClick = onRefresh, enabled = connected && !state.healthSyncInProgress, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (state.healthSyncInProgress) "Syncing…" else "Sync Band data")
+                }
+                if (state.healthSyncInProgress) LinearProgressIndicator(Modifier.fillMaxWidth())
             }
-            if (state.healthSyncInProgress) LinearProgressIndicator(Modifier.fillMaxWidth())
+            item { ActivitySummaryCard("Run", selectedDay?.runSummary(), showDistance = true) }
+            item { ActivitySummaryCard("Exercise", selectedDay?.workoutSummary(), showDistance = false) }
+            item { SleepSummaryCard(selectedDay?.sleepSummary()) }
+            if (history.isEmpty()) item {
+                SectionCard("No trend data", "Connect the Band and sync.")
+            }
         }
-        item { ActivitySummaryCard("Latest run", state.healthSnapshot?.lastRun, showDistance = true) }
-        item { ActivitySummaryCard("Latest exercise", state.healthSnapshot?.lastWorkout, showDistance = false) }
-        item { SleepSummaryCard(state.healthSnapshot?.lastSleep) }
-        if (history.isEmpty()) item {
-            SectionCard("No trend data", "Connect the Band and sync.")
+    }
+}
+
+@Composable
+private fun DayNavigator(
+    date: LocalDate,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val today = LocalDate.now()
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 3.dp,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onPrevious) { Icon(Icons.Rounded.ChevronLeft, "Previous day") }
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(if (date == today) "Today" else date.format(DateTimeFormatter.ofPattern("EEEE")), fontWeight = FontWeight.SemiBold)
+                Text(date.format(DateTimeFormatter.ofPattern("MMM d, yyyy")), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = onNext, enabled = date.isBefore(today)) { Icon(Icons.Rounded.ChevronRight, "Next day") }
         }
     }
 }
@@ -580,7 +622,7 @@ private fun SleepSummaryCard(summary: BandSleepSummary?) {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Rounded.Bedtime, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text("Latest sleep", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text("Sleep", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             }
             Text(summary?.endedAt?.let(::healthDate) ?: "No saved sleep found", color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (summary != null) {

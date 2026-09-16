@@ -26,6 +26,8 @@ import com.unsame.microband.data.toEntity
 import com.unsame.microband.data.toModel
 import com.unsame.microband.band.model.BandHealthSnapshot
 import com.unsame.microband.band.model.BandDailyMetrics
+import com.unsame.microband.band.model.BandActivitySummary
+import com.unsame.microband.band.model.BandSleepSummary
 import com.unsame.microband.band.model.BandFirmwareIdentity
 import com.unsame.microband.band.model.FirmwareUpdateStage
 import com.unsame.microband.band.model.FirmwareUpdateStatus
@@ -573,19 +575,77 @@ class BandConnectionManager(
         fresh.daily?.takeIf { it.hasData && !it.cumulativeSinceReset }?.let { daily ->
             saveDailyMetrics(freshDate, fresh.syncedAt, daily)
         }
+        saveSessionSummaries(merged)
     }
 
     private suspend fun saveDailyMetrics(date: LocalDate, syncedAt: Instant, daily: BandDailyMetrics) {
+        val key = date.toString()
+        val existing = healthDailyDao.get(key)
         healthDailyDao.upsert(
-            HealthDailyEntity(
-                localDate = date.toString(),
-                syncedAt = syncedAt.toEpochMilli(),
+            (existing ?: HealthDailyEntity(localDate = key, syncedAt = syncedAt.toEpochMilli())).copy(
+                syncedAt = maxOf(existing?.syncedAt ?: 0, syncedAt.toEpochMilli()),
                 steps = daily.steps,
                 calories = daily.calories,
                 distanceCentimeters = daily.distanceCentimeters,
                 flightsAscended = daily.flightsAscended,
                 elevationGainCentimeters = daily.elevationGainCentimeters,
                 uvExposure = daily.uvExposure,
+            ),
+        )
+    }
+
+    private suspend fun saveSessionSummaries(snapshot: BandHealthSnapshot) {
+        snapshot.lastRun?.let { saveActivitySummary(it, snapshot.syncedAt, isRun = true) }
+        snapshot.lastWorkout?.let { saveActivitySummary(it, snapshot.syncedAt, isRun = false) }
+        snapshot.lastSleep?.let { saveSleepSummary(it, snapshot.syncedAt) }
+    }
+
+    private suspend fun saveActivitySummary(summary: BandActivitySummary, syncedAt: Instant, isRun: Boolean) {
+        val eventTime = summary.endedAt ?: summary.startedAt ?: return
+        val key = eventTime.atZone(ZoneId.systemDefault()).toLocalDate().toString()
+        val existing = healthDailyDao.get(key)
+        val existingEnd = if (isRun) existing?.runEndedAt else existing?.workoutEndedAt
+        if (existingEnd != null && existingEnd > eventTime.toEpochMilli()) return
+        val base = existing ?: HealthDailyEntity(localDate = key, syncedAt = syncedAt.toEpochMilli())
+        healthDailyDao.upsert(
+            if (isRun) base.copy(
+                syncedAt = maxOf(base.syncedAt, syncedAt.toEpochMilli()),
+                runStartedAt = summary.startedAt?.toEpochMilli(),
+                runEndedAt = summary.endedAt?.toEpochMilli(),
+                runDuration = summary.durationMillis,
+                runDistance = summary.distanceCentimeters,
+                runCalories = summary.calories,
+                runAverageHeartRate = summary.averageHeartRate,
+                runMaximumHeartRate = summary.maximumHeartRate,
+            ) else base.copy(
+                syncedAt = maxOf(base.syncedAt, syncedAt.toEpochMilli()),
+                workoutStartedAt = summary.startedAt?.toEpochMilli(),
+                workoutEndedAt = summary.endedAt?.toEpochMilli(),
+                workoutDuration = summary.durationMillis,
+                workoutCalories = summary.calories,
+                workoutAverageHeartRate = summary.averageHeartRate,
+                workoutMaximumHeartRate = summary.maximumHeartRate,
+            ),
+        )
+    }
+
+    private suspend fun saveSleepSummary(summary: BandSleepSummary, syncedAt: Instant) {
+        val eventTime = summary.endedAt ?: summary.startedAt ?: return
+        val key = eventTime.atZone(ZoneId.systemDefault()).toLocalDate().toString()
+        val existing = healthDailyDao.get(key)
+        if (existing?.sleepEndedAt != null && existing.sleepEndedAt > eventTime.toEpochMilli()) return
+        val base = existing ?: HealthDailyEntity(localDate = key, syncedAt = syncedAt.toEpochMilli())
+        healthDailyDao.upsert(
+            base.copy(
+                syncedAt = maxOf(base.syncedAt, syncedAt.toEpochMilli()),
+                sleepStartedAt = summary.startedAt?.toEpochMilli(),
+                sleepEndedAt = summary.endedAt?.toEpochMilli(),
+                sleepDuration = summary.durationMillis,
+                sleepTimeAsleep = summary.timeAsleepMillis,
+                sleepTimesWokeUp = summary.timesWokeUp,
+                sleepCalories = summary.calories,
+                sleepRestingHeartRate = summary.restingHeartRate,
+                sleepTimeToFallAsleep = summary.timeToFallAsleepMillis,
             ),
         )
     }

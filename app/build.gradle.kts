@@ -12,8 +12,8 @@ android {
         applicationId = "com.unsame.microband"
         minSdk = 31
         targetSdk = 37
-        versionCode = 18
-        versionName = "0.8.2"
+        versionCode = 19
+        versionName = "0.9.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
