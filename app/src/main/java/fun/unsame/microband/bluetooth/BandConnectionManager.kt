@@ -124,6 +124,7 @@ class BandConnectionManager(
                     parsedStatus = status,
                 ),
             )
+            packetLogDao.trim()
         }
     }
     private val protocol = BandProtocol(transport)
@@ -584,12 +585,12 @@ class BandConnectionManager(
         healthDailyDao.upsert(
             (existing ?: HealthDailyEntity(localDate = key, syncedAt = syncedAt.toEpochMilli())).copy(
                 syncedAt = maxOf(existing?.syncedAt ?: 0, syncedAt.toEpochMilli()),
-                steps = daily.steps,
-                calories = daily.calories,
-                distanceCentimeters = daily.distanceCentimeters,
-                flightsAscended = daily.flightsAscended,
-                elevationGainCentimeters = daily.elevationGainCentimeters,
-                uvExposure = daily.uvExposure,
+                steps = daily.steps ?: existing?.steps,
+                calories = daily.calories ?: existing?.calories,
+                distanceCentimeters = daily.distanceCentimeters ?: existing?.distanceCentimeters,
+                flightsAscended = daily.flightsAscended ?: existing?.flightsAscended,
+                elevationGainCentimeters = daily.elevationGainCentimeters ?: existing?.elevationGainCentimeters,
+                uvExposure = daily.uvExposure ?: existing?.uvExposure,
             ),
         )
     }

@@ -41,6 +41,9 @@ interface PacketLogDao {
 
     @Query("DELETE FROM protocol_packet_log")
     suspend fun clear()
+
+    @Query("DELETE FROM protocol_packet_log WHERE id NOT IN (SELECT id FROM protocol_packet_log ORDER BY id DESC LIMIT :keep)")
+    suspend fun trim(keep: Int = 500)
 }
 
 @Entity(tableName = "health_snapshot")
@@ -131,41 +134,60 @@ interface HealthDailyDao {
     suspend fun upsert(day: HealthDailyEntity)
 }
 
-fun HealthDailyEntity.runSummary(): BandActivitySummary? = runDuration?.let {
+private fun activitySummary(
+    startedAt: Long?,
+    endedAt: Long?,
+    duration: Long?,
+    distanceCentimeters: Long?,
+    calories: Long?,
+    averageHeartRate: Long?,
+    maximumHeartRate: Long?,
+): BandActivitySummary? = duration?.let {
     BandActivitySummary(
-        startedAt = runStartedAt?.let(Instant::ofEpochMilli),
-        endedAt = runEndedAt?.let(Instant::ofEpochMilli),
+        startedAt = startedAt?.let(Instant::ofEpochMilli),
+        endedAt = endedAt?.let(Instant::ofEpochMilli),
         durationMillis = it,
-        distanceCentimeters = runDistance,
-        calories = runCalories ?: 0,
-        averageHeartRate = runAverageHeartRate ?: 0,
-        maximumHeartRate = runMaximumHeartRate ?: 0,
+        distanceCentimeters = distanceCentimeters,
+        calories = calories ?: 0,
+        averageHeartRate = averageHeartRate ?: 0,
+        maximumHeartRate = maximumHeartRate ?: 0,
     )
 }?.takeIf { it.isValid() }
 
-fun HealthDailyEntity.workoutSummary(): BandActivitySummary? = workoutDuration?.let {
-    BandActivitySummary(
-        startedAt = workoutStartedAt?.let(Instant::ofEpochMilli),
-        endedAt = workoutEndedAt?.let(Instant::ofEpochMilli),
-        durationMillis = it,
-        calories = workoutCalories ?: 0,
-        averageHeartRate = workoutAverageHeartRate ?: 0,
-        maximumHeartRate = workoutMaximumHeartRate ?: 0,
-    )
-}?.takeIf { it.isValid() }
-
-fun HealthDailyEntity.sleepSummary(): BandSleepSummary? = sleepDuration?.let {
+private fun sleepSummary(
+    startedAt: Long?,
+    endedAt: Long?,
+    duration: Long?,
+    timeAsleep: Long?,
+    timesWokeUp: Long?,
+    calories: Long?,
+    restingHeartRate: Long?,
+    timeToFallAsleep: Long?,
+): BandSleepSummary? = duration?.let {
     BandSleepSummary(
-        startedAt = sleepStartedAt?.let(Instant::ofEpochMilli),
-        endedAt = sleepEndedAt?.let(Instant::ofEpochMilli),
+        startedAt = startedAt?.let(Instant::ofEpochMilli),
+        endedAt = endedAt?.let(Instant::ofEpochMilli),
         durationMillis = it,
-        timeAsleepMillis = sleepTimeAsleep ?: 0,
-        timesWokeUp = sleepTimesWokeUp ?: 0,
-        calories = sleepCalories ?: 0,
-        restingHeartRate = sleepRestingHeartRate ?: 0,
-        timeToFallAsleepMillis = sleepTimeToFallAsleep ?: 0,
+        timeAsleepMillis = timeAsleep ?: 0,
+        timesWokeUp = timesWokeUp ?: 0,
+        calories = calories ?: 0,
+        restingHeartRate = restingHeartRate ?: 0,
+        timeToFallAsleepMillis = timeToFallAsleep ?: 0,
     )
 }?.takeIf { it.isValid() }
+
+fun HealthDailyEntity.runSummary(): BandActivitySummary? = activitySummary(
+    runStartedAt, runEndedAt, runDuration, runDistance, runCalories, runAverageHeartRate, runMaximumHeartRate,
+)
+
+fun HealthDailyEntity.workoutSummary(): BandActivitySummary? = activitySummary(
+    workoutStartedAt, workoutEndedAt, workoutDuration, null, workoutCalories, workoutAverageHeartRate, workoutMaximumHeartRate,
+)
+
+fun HealthDailyEntity.sleepSummary(): BandSleepSummary? = sleepSummary(
+    sleepStartedAt, sleepEndedAt, sleepDuration, sleepTimeAsleep, sleepTimesWokeUp, sleepCalories,
+    sleepRestingHeartRate, sleepTimeToFallAsleep,
+)
 
 fun BandHealthSnapshot.toEntity() = HealthSnapshotEntity(
     syncedAt = syncedAt.toEpochMilli(),
@@ -199,41 +221,7 @@ fun BandHealthSnapshot.toEntity() = HealthSnapshotEntity(
     sleepTimeToFallAsleep = lastSleep?.timeToFallAsleepMillis,
 )
 
-fun HealthSnapshotEntity.toModel(): BandHealthSnapshot {
-    val run = runDuration?.let {
-        BandActivitySummary(
-            startedAt = runStartedAt?.let(Instant::ofEpochMilli),
-            endedAt = runEndedAt?.let(Instant::ofEpochMilli),
-            durationMillis = it,
-            distanceCentimeters = runDistance,
-            calories = runCalories ?: 0,
-            averageHeartRate = runAverageHeartRate ?: 0,
-            maximumHeartRate = runMaximumHeartRate ?: 0,
-        )
-    }?.takeIf { it.isValid() }
-    val workout = workoutDuration?.let {
-        BandActivitySummary(
-            startedAt = workoutStartedAt?.let(Instant::ofEpochMilli),
-            endedAt = workoutEndedAt?.let(Instant::ofEpochMilli),
-            durationMillis = it,
-            calories = workoutCalories ?: 0,
-            averageHeartRate = workoutAverageHeartRate ?: 0,
-            maximumHeartRate = workoutMaximumHeartRate ?: 0,
-        )
-    }?.takeIf { it.isValid() }
-    val sleep = sleepDuration?.let {
-        BandSleepSummary(
-            startedAt = sleepStartedAt?.let(Instant::ofEpochMilli),
-            endedAt = sleepEndedAt?.let(Instant::ofEpochMilli),
-            durationMillis = it,
-            timeAsleepMillis = sleepTimeAsleep ?: 0,
-            timesWokeUp = sleepTimesWokeUp ?: 0,
-            calories = sleepCalories ?: 0,
-            restingHeartRate = sleepRestingHeartRate ?: 0,
-            timeToFallAsleepMillis = sleepTimeToFallAsleep ?: 0,
-        )
-    }?.takeIf { it.isValid() }
-    return BandHealthSnapshot(
+fun HealthSnapshotEntity.toModel() = BandHealthSnapshot(
     syncedAt = Instant.ofEpochMilli(syncedAt),
     stepsToday = stepsToday,
     daily = BandDailyMetrics(
@@ -245,11 +233,17 @@ fun HealthSnapshotEntity.toModel(): BandHealthSnapshot {
         uvExposure = dailyUvExposure,
         cumulativeSinceReset = dailyIsCumulative,
     ).takeIf { it.hasData },
-    lastRun = run,
-    lastWorkout = workout,
-    lastSleep = sleep,
-    )
-}
+    lastRun = activitySummary(
+        runStartedAt, runEndedAt, runDuration, runDistance, runCalories, runAverageHeartRate, runMaximumHeartRate,
+    ),
+    lastWorkout = activitySummary(
+        workoutStartedAt, workoutEndedAt, workoutDuration, null, workoutCalories, workoutAverageHeartRate, workoutMaximumHeartRate,
+    ),
+    lastSleep = sleepSummary(
+        sleepStartedAt, sleepEndedAt, sleepDuration, sleepTimeAsleep, sleepTimesWokeUp, sleepCalories,
+        sleepRestingHeartRate, sleepTimeToFallAsleep,
+    ),
+)
 
 private fun BandActivitySummary.isValid() = durationMillis >= 30_000 && startedAt != null && endedAt != null && !endedAt.isBefore(startedAt)
 private fun BandSleepSummary.isValid() = durationMillis >= 60_000 && startedAt != null && endedAt != null && !endedAt.isBefore(startedAt)

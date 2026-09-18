@@ -90,6 +90,7 @@ class MainActivity : ComponentActivity() {
                     onSetGeminiEnabled = viewModel::setGeminiAssistantEnabled,
                     onSaveGeminiKey = viewModel::saveGeminiApiKey,
                     onClearGeminiKey = viewModel::clearGeminiApiKey,
+                    onMessageShown = viewModel::consumeMessage,
                 )
             }
         }

@@ -178,6 +178,8 @@ class MicrobandViewModel(
         connectionManager.connect(association.device)
     }
 
+    fun consumeMessage() = mutableState.update { it.copy(message = null) }
+
     fun disconnect() = connectionManager.disconnect()
     fun inspectBand() = connectionManager.inspect()
     fun finishSetup() = connectionManager.finishSetup()
