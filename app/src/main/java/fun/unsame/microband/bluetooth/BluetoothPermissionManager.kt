@@ -6,15 +6,13 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 
 data class BluetoothPermissionState(
-    val canScan: Boolean,
     val canConnect: Boolean,
 ) {
-    val allGranted: Boolean get() = canScan && canConnect
+    val allGranted: Boolean get() = canConnect
 }
 
 object BluetoothPermissionManager {
     fun state(context: Context) = BluetoothPermissionState(
-        canScan = granted(context, Manifest.permission.BLUETOOTH_SCAN),
         canConnect = granted(context, Manifest.permission.BLUETOOTH_CONNECT),
     )
 

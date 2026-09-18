@@ -25,7 +25,7 @@ Microband is early-stage software built around reverse-engineered interoperabili
 
 | Feature | Status |
 | --- | --- |
-| Android companion-device association | Working |
+| Classic Bluetooth pairing and device selection | Working |
 | Classic Bluetooth RFCOMM connection | Working |
 | Band 2 identification and diagnostics | Working |
 | First-run Band setup/OOBE completion | Working |
@@ -47,8 +47,8 @@ Microsoft Band 1 is not currently supported.
 
 ## Features
 
-- Finds new and already-paired devices named `MSFT Band 2 xx:xx`.
-- Associates through Android's secure Companion Device Manager.
+- Pairs through Android's standard Bluetooth settings—no proprietary or hidden pairing dance.
+- Lets you pick any already-paired Bluetooth device by hand, so a Band renamed by a previous owner works too, not just `MSFT Band 2 xx:xx`.
 - Uses the public SDP-based RFCOMM API—no root access or hidden Bluetooth APIs.
 - Inspects PCB, firmware, application, setup, and clock state.
 - Safely resumes and completes first-run Band 2 setup.
@@ -99,9 +99,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ## First setup
 
 1. Charge the Band and keep it close to the phone.
-2. Open Microband and grant Nearby devices access.
-3. Tap **Find my Band** and select the Band in Android's device picker.
-4. Confirm the Bluetooth pairing code on both devices if prompted.
+2. Open Microband. Step 1: tap **Pair my Band**, pair the Band from Android's Bluetooth settings, then come back to Microband.
+3. Grant Bluetooth access if asked.
+4. Step 2: tap **Select my Band and Start**, then pick the Band from the list of paired devices.
 5. Tap **Connect**.
 6. If the Band is factory-reset, follow **Finish setup**. Microband checks the device model and current OOBE state before sending setup commands.
 7. Open **Notifications** to choose which alerts may appear on the Band.
@@ -145,6 +145,10 @@ Run unit tests, lint, and a debug build:
 The unit tests cover packet framing, status parsing, time conversion, timezone payloads, notification encoding and classification, health decoding, tile-list encoding, personalization colors, and association matching.
 
 A physical Band 2 is required to validate Bluetooth discovery, RFCOMM behavior, OOBE, notification display, health sync, themes, wallpapers, tile changes, and firmware operations.
+
+### Signed release builds
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds a minified `assembleRelease` APK and publishes it as a GitHub release. The release signing key never lives in the repo: the workflow decodes it from the `MICROBAND_RELEASE_KEYSTORE_BASE64` repository secret and passes the store/key passwords and alias through `MICROBAND_RELEASE_STORE_PASSWORD`, `MICROBAND_RELEASE_KEY_ALIAS`, and `MICROBAND_RELEASE_KEY_PASSWORD`. Without those secrets (e.g. a local `assembleRelease`), the release build type is left unsigned.
 
 ## Architecture
 

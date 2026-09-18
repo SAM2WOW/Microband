@@ -1,0 +1,110 @@
+name: Release APK
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read app version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          echo "version=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "apk_name=Microband.v$VERSION_NAME.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this version was already released
+        id: check
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Require release signing secrets
+        if: steps.check.outputs.exists == 'false'
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.MICROBAND_RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.MICROBAND_RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.MICROBAND_RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.MICROBAND_RELEASE_KEY_PASSWORD }}
+        run: |
+          # assembleRelease falls back to an UNSIGNED apk when these are missing (see the
+          # hasReleaseSigning check in app/build.gradle.kts), and the publish step below would
+          # then attach an uninstallable APK to a public release. Stop before that happens.
+          missing=""
+          [ -n "$RELEASE_KEYSTORE_BASE64" ] || missing="$missing MICROBAND_RELEASE_KEYSTORE_BASE64"
+          [ -n "$RELEASE_STORE_PASSWORD" ] || missing="$missing MICROBAND_RELEASE_STORE_PASSWORD"
+          [ -n "$RELEASE_KEY_ALIAS" ] || missing="$missing MICROBAND_RELEASE_KEY_ALIAS"
+          [ -n "$RELEASE_KEY_PASSWORD" ] || missing="$missing MICROBAND_RELEASE_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Release signing secrets are not configured:$missing"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.check.outputs.exists == 'false'
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          SDK_ROOT="$RUNNER_TEMP/android-sdk"
+          mkdir -p "$SDK_ROOT/cmdline-tools"
+          curl -sSL -o "$RUNNER_TEMP/cmdline-tools.zip" \
+            https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
+          unzip -q "$RUNNER_TEMP/cmdline-tools.zip" -d "$SDK_ROOT/cmdline-tools"
+          mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+          # sdkmanager stops reading stdin once all licenses are accepted, so `yes` gets a
+          # broken pipe and exits non-zero; with pipefail that would fail this step even
+          # though license acceptance itself succeeded. The `|| true` absorbs only that.
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Decode release keystore
+        if: steps.check.outputs.exists == 'false'
+        run: echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.MICROBAND_RELEASE_KEYSTORE_BASE64 }}
+
+      - name: Build signed release APK
+        if: steps.check.outputs.exists == 'false'
+        run: ./gradlew :app:assembleRelease --no-daemon
+        env:
+          MICROBAND_RELEASE_STORE_FILE: ${{ format('{0}/release.jks', runner.temp) }}
+          MICROBAND_RELEASE_STORE_PASSWORD: ${{ secrets.MICROBAND_RELEASE_STORE_PASSWORD }}
+          MICROBAND_RELEASE_KEY_ALIAS: ${{ secrets.MICROBAND_RELEASE_KEY_ALIAS }}
+          MICROBAND_RELEASE_KEY_PASSWORD: ${{ secrets.MICROBAND_RELEASE_KEY_PASSWORD }}
+
+      - name: Rename APK for release
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/${{ steps.version.outputs.apk_name }}"
+
+      - name: Create tag and publish GitHub release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Microband ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          files: dist/${{ steps.version.outputs.apk_name }}
+          generate_release_notes: true

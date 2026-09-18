@@ -8,22 +8,17 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.unsame.microband.band.oobe.BandOobeStep
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 
 private val Context.dataStore by preferencesDataStore("microband")
 
 class MicrobandPreferences(private val context: Context) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    val associationId: Flow<Int?> = context.dataStore.data.map { it[ASSOCIATION_ID] }
+    val manualDeviceAddress: Flow<String?> = context.dataStore.data.map { it[MANUAL_DEVICE_ADDRESS] }
     val protocolLogging: Flow<Boolean> = context.dataStore.data.map { it[PROTOCOL_LOGGING] ?: false }
     val allNotificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALL_NOTIFICATIONS_ENABLED] ?: true }
+    val maskNotificationsWhenLocked: Flow<Boolean> = context.dataStore.data.map { it[MASK_NOTIFICATIONS_WHEN_LOCKED] ?: false }
     val disabledNotificationPackages: Flow<Set<String>> = context.dataStore.data.map { it[DISABLED_NOTIFICATION_PACKAGES] ?: emptySet() }
     val notificationActivity: Flow<Map<String, NotificationAppActivity>> = context.dataStore.data.map {
         decodeNotificationActivity(it[NOTIFICATION_ACTIVITY].orEmpty())
@@ -35,12 +30,10 @@ class MicrobandPreferences(private val context: Context) {
             ?: BandOobeStep.Inspect
     }
 
-    suspend fun setAssociationId(value: Int) {
-        context.dataStore.edit { it[ASSOCIATION_ID] = value }
-    }
-
-    fun setAssociationIdAsync(value: Int) {
-        scope.launch { setAssociationId(value) }
+    suspend fun setManualDeviceAddress(address: String?) {
+        context.dataStore.edit { preferences ->
+            if (address == null) preferences.remove(MANUAL_DEVICE_ADDRESS) else preferences[MANUAL_DEVICE_ADDRESS] = address
+        }
     }
 
     suspend fun setProtocolLogging(enabled: Boolean) {
@@ -52,6 +45,10 @@ class MicrobandPreferences(private val context: Context) {
             preferences[ALL_NOTIFICATIONS_ENABLED] = enabled
             if (enabled) preferences[DISABLED_NOTIFICATION_PACKAGES] = emptySet()
         }
+    }
+
+    suspend fun setMaskNotificationsWhenLocked(enabled: Boolean) {
+        context.dataStore.edit { it[MASK_NOTIFICATIONS_WHEN_LOCKED] = enabled }
     }
 
     suspend fun setNotificationPackageEnabled(packageName: String, enabled: Boolean, knownPackages: Set<String>) {
@@ -101,10 +98,11 @@ class MicrobandPreferences(private val context: Context) {
     }
 
     companion object {
-        private val ASSOCIATION_ID = intPreferencesKey("association_id")
+        private val MANUAL_DEVICE_ADDRESS = stringPreferencesKey("manual_device_address")
         private val PROTOCOL_LOGGING = booleanPreferencesKey("protocol_logging")
         private val OOBE_STEP = stringPreferencesKey("oobe_step")
         private val ALL_NOTIFICATIONS_ENABLED = booleanPreferencesKey("all_notifications_enabled")
+        private val MASK_NOTIFICATIONS_WHEN_LOCKED = booleanPreferencesKey("mask_notifications_when_locked")
         private val DISABLED_NOTIFICATION_PACKAGES = stringSetPreferencesKey("disabled_notification_packages")
         private val NOTIFICATION_ACTIVITY = stringSetPreferencesKey("notification_activity")
         private val THEME_ACCENT = intPreferencesKey("theme_accent")

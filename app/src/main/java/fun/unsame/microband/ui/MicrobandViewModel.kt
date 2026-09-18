@@ -23,6 +23,7 @@ import com.unsame.microband.bluetooth.BandAssociationManager
 import com.unsame.microband.bluetooth.BandConnectionManager
 import com.unsame.microband.bluetooth.BluetoothPermissionManager
 import com.unsame.microband.bluetooth.BluetoothPermissionState
+import com.unsame.microband.bluetooth.PairedDeviceOption
 import com.unsame.microband.data.MicrobandPreferences
 import com.unsame.microband.data.ProtocolPacketLog
 import com.unsame.microband.data.HealthDailyEntity
@@ -41,20 +42,21 @@ import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 
 data class MicrobandUiState(
-    val permissions: BluetoothPermissionState = BluetoothPermissionState(false, false),
+    val permissions: BluetoothPermissionState = BluetoothPermissionState(false),
     val association: BandAssociation? = null,
     val connection: BandConnectionState = BandConnectionState.Unassociated,
     val oobeStep: BandOobeStep = BandOobeStep.Inspect,
     val protocolLogging: Boolean = false,
     val logs: List<ProtocolPacketLog> = emptyList(),
     val message: String? = null,
-    val associationInProgress: Boolean = false,
+    val pairedDevices: List<PairedDeviceOption> = emptyList(),
     val setupInProgress: Boolean = false,
     val firmwarePackageStatus: String? = null,
     val notificationAccessGranted: Boolean = false,
     val notificationApps: List<NotificationAppInfo> = emptyList(),
     val allNotificationsEnabled: Boolean = true,
     val disabledNotificationPackages: Set<String> = emptySet(),
+    val maskNotificationsWhenLocked: Boolean = true,
     val batteryOptimizationIgnored: Boolean = false,
     val healthSnapshot: BandHealthSnapshot? = null,
     val healthSyncInProgress: Boolean = false,
@@ -92,6 +94,7 @@ class MicrobandViewModel(
         viewModelScope.launch { preferences.protocolLogging.collect { value -> mutableState.update { it.copy(protocolLogging = value) } } }
         viewModelScope.launch { preferences.allNotificationsEnabled.collect { value -> mutableState.update { it.copy(allNotificationsEnabled = value) } } }
         viewModelScope.launch { preferences.disabledNotificationPackages.collect { value -> mutableState.update { it.copy(disabledNotificationPackages = value) } } }
+        viewModelScope.launch { preferences.maskNotificationsWhenLocked.collect { value -> mutableState.update { it.copy(maskNotificationsWhenLocked = value) } } }
         viewModelScope.launch { preferences.notificationActivity.collect { value -> notificationActivity = value; rebuildNotificationApps() } }
         viewModelScope.launch { preferences.themeAccent.collect { value -> mutableState.update { it.copy(themeAccent = value) } } }
         viewModelScope.launch { preferences.geminiAssistantEnabled.collect { value -> mutableState.update { it.copy(geminiAssistantEnabled = value) } } }
@@ -121,39 +124,23 @@ class MicrobandViewModel(
         }
     }
 
-    fun findBand(launchChooser: (android.content.IntentSender) -> Unit) {
-        mutableState.update { it.copy(associationInProgress = true, message = null) }
-        associationManager.associate(
-            onChooser = launchChooser,
-            onAssociated = { association -> acceptAssociation(association) },
-            onFailure = { error ->
-                mutableState.update { it.copy(associationInProgress = false, message = error) }
-            },
-        )
+    // Step 1 of pairing: hand off to Android's own Bluetooth settings so the user pairs the
+    // Band the normal classic-Bluetooth way. There is no callback for this -- the user comes
+    // back to the app manually once paired, and refresh()/refreshPairedDevices() pick it up.
+    fun openBluetoothSettings(context: Context) {
+        context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    fun onAssociationResult(success: Boolean) {
-        if (!success) {
-            mutableState.update { it.copy(associationInProgress = false, message = "Association cancelled") }
-            return
-        }
-        // Android can return RESULT_OK slightly before CompanionDeviceManager publishes
-        // the association. Retry briefly instead of leaving the welcome screen unchanged.
-        viewModelScope.launch {
-            repeat(12) {
-                if (mutableState.value.association != null) return@launch
-                associationManager.currentAssociation()?.let { association ->
-                    acceptAssociation(association)
-                    return@launch
-                }
-                delay(250)
-            }
-            mutableState.update {
-                it.copy(
-                    associationInProgress = false,
-                    message = "Android did not finish saving the Band association. Please try again.",
-                )
-            }
+    fun refreshPairedDevices() {
+        mutableState.update { it.copy(pairedDevices = associationManager.pairedDeviceOptions()) }
+    }
+
+    fun selectPairedDevice(address: String) = viewModelScope.launch {
+        val association = associationManager.selectPairedDevice(address)
+        if (association != null) {
+            acceptAssociation(association)
+        } else {
+            mutableState.update { it.copy(message = "That device is no longer paired") }
         }
     }
 
@@ -163,8 +150,7 @@ class MicrobandViewModel(
             it.copy(
                 association = association,
                 connection = BandConnectionState.Disconnected,
-                associationInProgress = false,
-                message = "${runCatching { association.device.name }.getOrNull() ?: "Band"} associated",
+                message = "${runCatching { association.device.name }.getOrNull() ?: "Band"} selected",
             )
         }
     }
@@ -172,7 +158,7 @@ class MicrobandViewModel(
     fun connect() {
         val association = mutableState.value.association
         if (association == null) {
-            mutableState.update { it.copy(message = "Find your Band first") }
+            mutableState.update { it.copy(message = "Select your Band first") }
             return
         }
         connectionManager.connect(association.device)
@@ -181,6 +167,20 @@ class MicrobandViewModel(
     fun consumeMessage() = mutableState.update { it.copy(message = null) }
 
     fun disconnect() = connectionManager.disconnect()
+
+    // Forgets which Band the app is set to use, so the pairing screen comes back up. The
+    // device stays paired at the Android level -- this only clears our own remembered pick.
+    fun pairNewBand() = viewModelScope.launch {
+        connectionManager.disconnect()
+        preferences.setManualDeviceAddress(null)
+        mutableState.update {
+            it.copy(
+                association = null,
+                connection = BandConnectionState.Unassociated,
+                message = "Ready to pair a new Band",
+            )
+        }
+    }
     fun inspectBand() = connectionManager.inspect()
     fun finishSetup() = connectionManager.finishSetup()
     fun syncClock() = connectionManager.syncClock()
@@ -260,6 +260,10 @@ class MicrobandViewModel(
     }
 
     fun setAllNotifications(enabled: Boolean) = viewModelScope.launch { preferences.setAllNotificationsEnabled(enabled) }
+
+    fun setMaskNotificationsWhenLocked(enabled: Boolean) = viewModelScope.launch {
+        preferences.setMaskNotificationsWhenLocked(enabled)
+    }
 
     fun setGeminiAssistantEnabled(enabled: Boolean) = viewModelScope.launch {
         if (enabled && !connectionManager.geminiConfigured()) {

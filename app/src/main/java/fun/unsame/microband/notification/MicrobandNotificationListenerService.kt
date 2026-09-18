@@ -1,5 +1,6 @@
 package com.unsame.microband.notification
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -11,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -69,6 +71,11 @@ class MicrobandNotificationListenerService : NotificationListenerService() {
             if (!app.preferences.isNotificationPackageEnabled(normalized.sourcePackage)) return@launch
             if (!shouldSend(normalized, kind)) return@launch
 
+            val keyguard = getSystemService(KeyguardManager::class.java)
+            val maskWhenLocked = app.preferences.maskNotificationsWhenLocked.first()
+            val privateSafe = if (maskWhenLocked && keyguard?.isDeviceLocked == true) {
+                normalized.copy(body = "Unlock your phone to read this notification")
+            } else normalized
             val association = runCatching { app.associationManager.currentAssociation() }.getOrNull() ?: return@launch
             app.connectionManager.forwardNotification(normalized, kind, association.device)
         }

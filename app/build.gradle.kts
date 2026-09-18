@@ -4,6 +4,18 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// Release signing comes from environment variables so the keystore and its passwords never
+// touch the repo. Set by CI (see .github/workflows/release.yml) from GitHub secrets, or
+// locally by exporting them yourself. A release build without them is left unsigned.
+val releaseStoreFile = System.getenv("MICROBAND_RELEASE_STORE_FILE")
+val releaseStorePassword = System.getenv("MICROBAND_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("MICROBAND_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("MICROBAND_RELEASE_KEY_PASSWORD")
+val hasReleaseSigning = !releaseStoreFile.isNullOrBlank() &&
+    !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
+
 android {
     namespace = "com.unsame.microband"
     compileSdk = 37
@@ -12,9 +24,31 @@ android {
         applicationId = "com.unsame.microband"
         minSdk = 31
         targetSdk = 37
-        versionCode = 19
-        versionName = "0.9.0"
+        // versionCode encodes versionName as major*10000 + minor*100 + patch (0.9.1 -> 901).
+        // Kotlin doesn't allow a leading-zero literal, so write it as the plain integer.
+        versionCode = 901
+        versionName = "0.9.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
+        }
     }
 
     buildFeatures {
